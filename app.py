@@ -26,7 +26,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from community import create_community_blueprint
+from community import comments_for_target, create_community_blueprint
 from db import default_data_dir, get_db, init_app as init_db_app, init_db
 
 
@@ -360,6 +360,10 @@ def create_app(test_config=None) -> Flask:
         return render_template(
             "resource_detail.html", resource=resource, application=application,
             owner_applications=owner_applications,
+            comments=comments_for_target(
+                get_db(), "resource", resource_id, request.args.get("order", "new")
+            ),
+            target_type="resource", target_id=resource_id,
         )
 
     @app.route("/resources/<int:resource_id>/edit", methods=("GET", "POST"))
@@ -708,7 +712,13 @@ def create_app(test_config=None) -> Flask:
             "WHERE (m.lost_id=? OR m.found_id=?) AND lf.status!='withdrawn' ORDER BY m.score DESC",
             (item_id, item_id, item_id),
         ).fetchall()
-        return render_template("lost_found_detail.html", item=item, related=related)
+        return render_template(
+            "lost_found_detail.html", item=item, related=related,
+            comments=comments_for_target(
+                get_db(), "lost_found", item_id, request.args.get("order", "new")
+            ),
+            target_type="lost_found", target_id=item_id,
+        )
 
     @app.route("/lost-found/<int:item_id>/edit", methods=("GET", "POST"))
     @login_required

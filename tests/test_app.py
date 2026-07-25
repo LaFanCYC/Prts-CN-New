@@ -713,6 +713,111 @@ class CampusAppTest(unittest.TestCase):
             repost = db.execute("SELECT post_id,comment FROM reposts").fetchone()
         self.assertEqual(tuple(repost), (post_id, "推荐给正在入门的同学"))
 
+    def test_shared_comments_cover_posts_resources_and_lost_found(self):
+        self.register()
+        self.login()
+        self.publish_post()
+        self.publish_resource()
+        common = {
+            "description": "在一号教学楼附近遗失",
+            "occurred_on": date.today().isoformat(),
+            "location": "一号教学楼",
+            "keywords": "校园卡,蓝色",
+        }
+        self.client.post("/lost-found/new/lost", data={"title": "蓝色校园卡", **common})
+        with self.db() as db:
+            post_id = db.execute("SELECT id FROM posts").fetchone()[0]
+            resource_id = db.execute("SELECT id FROM resources").fetchone()[0]
+            lost_id = db.execute("SELECT id FROM lost_found").fetchone()[0]
+
+        self.switch_user("bob", "S002")
+        for target_type, target_id in (
+            ("post", post_id),
+            ("resource", resource_id),
+            ("lost_found", lost_id),
+        ):
+            response = self.client.post(
+                f"/comments/{target_type}/{target_id}", data={"body": "这个信息很有帮助"}
+            )
+            self.assertEqual(response.status_code, 302)
+
+        self.assertIn(
+            "这个信息很有帮助",
+            self.client.get(f"/community/{post_id}").get_data(as_text=True),
+        )
+        self.assertIn(
+            "这个信息很有帮助",
+            self.client.get(f"/resources/{resource_id}").get_data(as_text=True),
+        )
+        self.assertIn(
+            "这个信息很有帮助",
+            self.client.get(f"/lost-found/{lost_id}").get_data(as_text=True),
+        )
+
+    def test_reply_depth_reactions_and_comment_notifications(self):
+        self.register()
+        self.login()
+        self.publish_post()
+        with self.db() as db:
+            post_id = db.execute("SELECT id FROM posts").fetchone()[0]
+
+        self.switch_user("bob", "S002")
+        response = self.client.post(
+            f"/comments/post/{post_id}", data={"body": "请问几点开始？"}
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.db() as db:
+            comment_id = db.execute("SELECT id FROM comments").fetchone()[0]
+            alice_notices = db.execute(
+                "SELECT COUNT(*) FROM notifications n JOIN users u ON u.id=n.user_id WHERE u.username='alice'"
+            ).fetchone()[0]
+        self.assertEqual(alice_notices, 1)
+
+        self.client.post("/logout")
+        self.login()
+        self.assertEqual(
+            self.client.post(
+                f"/comments/{comment_id}/reply", data={"body": "晚上七点，@bob"}
+            ).status_code,
+            302,
+        )
+        with self.db() as db:
+            reply_id = db.execute(
+                "SELECT id FROM comments WHERE parent_id=?", (comment_id,)
+            ).fetchone()[0]
+            bob_notices = db.execute(
+                "SELECT COUNT(*) FROM notifications n JOIN users u ON u.id=n.user_id WHERE u.username='bob'"
+            ).fetchone()[0]
+        self.assertGreaterEqual(bob_notices, 1)
+
+        self.client.post("/logout")
+        self.login(username="bob")
+        self.assertEqual(
+            self.client.post(
+                f"/comments/{reply_id}/reply", data={"body": "不能继续嵌套"}
+            ).status_code,
+            400,
+        )
+        before = bob_notices
+        self.assertEqual(
+            self.client.post(f"/reactions/post/{post_id}/like").status_code, 302
+        )
+        with self.db() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM content_reactions").fetchone()[0], 1
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM notifications n JOIN users u ON u.id=n.user_id WHERE u.username='bob'"
+                ).fetchone()[0],
+                before,
+            )
+        self.client.post(f"/reactions/post/{post_id}/like")
+        with self.db() as db:
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM content_reactions").fetchone()[0], 0
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
