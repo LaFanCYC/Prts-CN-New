@@ -886,6 +886,78 @@ class CampusAppTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual((views, likes), (1, 1))
 
+    def test_text_moderation_rejects_or_queues_posts(self):
+        self.register()
+        self.login()
+        with self.db() as db:
+            db.execute(
+                "INSERT INTO moderation_rules(pattern,severity,note) VALUES('诈骗','reject','明显欺诈')"
+            )
+            db.execute(
+                "INSERT INTO moderation_rules(pattern,severity,note) VALUES('兼职','review','疑似广告')"
+            )
+            db.commit()
+
+        rejected = self.publish_post(body="这是诈骗信息")
+        self.assertEqual(rejected.status_code, 400)
+        queued = self.publish_post(title="校园兼职交流", body="分享兼职经验")
+        self.assertEqual(queued.status_code, 302)
+        with self.db() as db:
+            rows = db.execute("SELECT title,status FROM posts ORDER BY id").fetchall()
+        self.assertEqual([tuple(row) for row in rows], [("校园兼职交流", "pending")])
+
+    def test_report_withdrawal_audit_and_mute_form_a_governance_loop(self):
+        self.register()
+        self.login()
+        self.publish_post()
+        with self.db() as db:
+            post_id = db.execute("SELECT id FROM posts").fetchone()[0]
+
+        self.switch_user("bob", "S002")
+        self.assertEqual(
+            self.client.post(
+                f"/reports/post/{post_id}", data={"reason": "疑似广告刷屏"}
+            ).status_code,
+            302,
+        )
+        with self.db() as db:
+            report_id = db.execute("SELECT id FROM reports").fetchone()[0]
+            bob_id = db.execute("SELECT id FROM users WHERE username='bob'").fetchone()[0]
+
+        self.client.post("/logout")
+        self.register(username="carol", student_no="S003")
+        with self.db() as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='carol'")
+            db.commit()
+        self.login(username="carol")
+        self.assertEqual(
+            self.client.post(
+                f"/admin/reports/{report_id}/withdraw", data={"resolution": "确认违规"}
+            ).status_code,
+            302,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/admin/users/{bob_id}/restrict",
+                data={"kind": "mute", "hours": "24", "reason": "连续刷屏"},
+            ).status_code,
+            302,
+        )
+        with self.db() as db:
+            self.assertEqual(
+                db.execute("SELECT status FROM posts WHERE id=?", (post_id,)).fetchone()[0],
+                "withdrawn",
+            )
+            self.assertEqual(
+                db.execute("SELECT status FROM reports WHERE id=?", (report_id,)).fetchone()[0],
+                "resolved",
+            )
+            self.assertGreaterEqual(db.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0], 2)
+
+        self.client.post("/logout")
+        self.login(username="bob")
+        self.assertEqual(self.publish_post(title="禁言后发帖").status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()

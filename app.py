@@ -26,7 +26,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from community import comments_for_target, create_community_blueprint, recommended_posts
+from community import audit, comments_for_target, create_community_blueprint, recommended_posts
 from db import default_data_dir, get_db, init_app as init_db_app, init_db
 
 
@@ -257,6 +257,12 @@ def create_app(test_config=None) -> Flask:
         ).fetchone()
         if user and not user["is_active"]:
             return render_template("auth.html", mode="login", error="账号已被禁用。"), 403
+        if user and get_db().execute(
+            "SELECT 1 FROM account_restrictions WHERE user_id=? AND kind='temp_ban' "
+            "AND is_active=1 AND ends_at>CURRENT_TIMESTAMP",
+            (user["id"],),
+        ).fetchone():
+            return render_template("auth.html", mode="login", error="账号处于临时封禁期。"), 403
         if not user or not check_password_hash(user["password_hash"], request.form.get("password", "")):
             return render_template("auth.html", mode="login", error="用户名或密码错误。"), 400
         session.clear()
@@ -856,6 +862,22 @@ def create_app(test_config=None) -> Flask:
                 "SELECT lf.*,u.name owner_name FROM lost_found lf JOIN users u ON u.id=lf.user_id "
                 "WHERE lf.status!='withdrawn' ORDER BY lf.created_at DESC"
             ).fetchall(),
+            reports=db.execute(
+                "SELECT r.*,u.name reporter_name FROM reports r JOIN users u ON u.id=r.reporter_id "
+                "WHERE r.status='open' ORDER BY r.created_at"
+            ).fetchall(),
+            pending_posts=db.execute(
+                "SELECT p.*,u.name author_name FROM posts p JOIN users u ON u.id=p.author_id "
+                "WHERE p.status='pending' ORDER BY p.created_at"
+            ).fetchall(),
+            restrictions=db.execute(
+                "SELECT ar.*,u.name user_name FROM account_restrictions ar JOIN users u ON u.id=ar.user_id "
+                "WHERE ar.is_active=1 AND ar.ends_at>CURRENT_TIMESTAMP ORDER BY ar.created_at DESC"
+            ).fetchall(),
+            audit_logs=db.execute(
+                "SELECT a.*,u.name actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id "
+                "ORDER BY a.created_at DESC,a.id DESC LIMIT 100"
+            ).fetchall(),
         )
 
     @app.route("/api/admin/stats")
@@ -933,6 +955,92 @@ def create_app(test_config=None) -> Flask:
                 abort(409, "用户名或学号已存在。")
             raise
         flash("用户资料已更正。", "success")
+        return redirect(url_for("admin"))
+
+    @app.post("/admin/reports/<int:report_id>/<action>")
+    @admin_required
+    def admin_report_action(report_id, action):
+        if action not in {"withdraw", "reject"}:
+            abort(404)
+        db = get_db()
+        report = db.execute("SELECT * FROM reports WHERE id=? AND status='open'", (report_id,)).fetchone()
+        if report is None:
+            abort(404)
+        resolution = request.form.get("resolution", "").strip()
+        if not resolution or len(resolution) > 300:
+            abort(400, "处理说明不能为空且不能超过 300 字。")
+        if action == "withdraw":
+            statements = {
+                "post": "UPDATE posts SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                "resource": "UPDATE resources SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                "lost_found": "UPDATE lost_found SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                "comment": "UPDATE comments SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=? OR parent_id=?",
+            }
+            statement = statements[report["target_type"]]
+            params = (report["target_id"], report["target_id"]) if report["target_type"] == "comment" else (report["target_id"],)
+            db.execute(statement, params)
+        status = "resolved" if action == "withdraw" else "rejected"
+        db.execute(
+            "UPDATE reports SET status=?,resolution=?,moderator_id=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+            (status, resolution, g.user["id"], report_id),
+        )
+        audit(db, g.user["id"], f"report_{action}", report["target_type"], report["target_id"], resolution)
+        _notify(db, report["reporter_id"], f"你的举报已处理：{resolution}", url_for("notifications"))
+        db.commit()
+        return redirect(url_for("admin"))
+
+    @app.post("/admin/posts/<int:post_id>/<action>")
+    @admin_required
+    def admin_post_action(post_id, action):
+        if action not in {"publish", "withdraw"}:
+            abort(404)
+        db = get_db()
+        post = db.execute("SELECT * FROM posts WHERE id=?", (post_id,)).fetchone()
+        if post is None:
+            abort(404)
+        status = "published" if action == "publish" else "withdrawn"
+        db.execute("UPDATE posts SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (status, post_id))
+        audit(db, g.user["id"], f"post_{action}", "post", post_id)
+        _notify(db, post["author_id"], "你的帖子审核状态已更新", url_for("community.post_detail", post_id=post_id) if status == "published" else url_for("community.list_posts"))
+        db.commit()
+        return redirect(url_for("admin"))
+
+    @app.post("/admin/users/<int:user_id>/restrict")
+    @admin_required
+    def admin_user_restrict(user_id):
+        kind = request.form.get("kind", "")
+        reason = request.form.get("reason", "").strip()
+        try:
+            hours = int(request.form.get("hours", "0"))
+        except ValueError:
+            hours = 0
+        if kind not in {"mute", "temp_ban"} or not reason or not 1 <= hours <= 720:
+            abort(400, "限制类型、原因或时长无效。")
+        db = get_db()
+        if db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone() is None:
+            abort(404)
+        modifier = f"+{hours} hours"
+        db.execute(
+            "INSERT INTO account_restrictions(user_id,kind,reason,ends_at,created_by) "
+            "VALUES(?,?,?,DATETIME('now',?),?)",
+            (user_id, kind, reason, modifier, g.user["id"]),
+        )
+        audit(db, g.user["id"], f"user_{kind}", "user", user_id, reason)
+        _notify(db, user_id, f"账号受到{hours}小时限制：{reason}", url_for("rules"))
+        db.commit()
+        return redirect(url_for("admin"))
+
+    @app.post("/admin/users/<int:user_id>/restore")
+    @admin_required
+    def admin_user_restore(user_id):
+        db = get_db()
+        db.execute(
+            "UPDATE account_restrictions SET is_active=0,resolved_at=CURRENT_TIMESTAMP "
+            "WHERE user_id=? AND is_active=1",
+            (user_id,),
+        )
+        audit(db, g.user["id"], "user_restore", "user", user_id)
+        db.commit()
         return redirect(url_for("admin"))
 
     @app.errorhandler(400)

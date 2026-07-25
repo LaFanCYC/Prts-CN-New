@@ -32,6 +32,26 @@ def record_behavior(db, user_id, event_type, target_type, target_id):
         )
 
 
+def screen_content(db, text, has_image=False):
+    normalized = text.casefold()
+    result = ("review", "图片需要人工审核") if has_image else ("publish", "")
+    for rule in db.execute(
+        "SELECT pattern,severity,note FROM moderation_rules WHERE is_active=1 ORDER BY severity"
+    ).fetchall():
+        if rule["pattern"].casefold() in normalized:
+            if rule["severity"] == "reject":
+                return "reject", rule["note"] or "内容未通过自动审核"
+            result = ("review", rule["note"] or "内容需要人工审核")
+    return result
+
+
+def audit(db, actor_id, action, target_type, target_id=None, detail=""):
+    db.execute(
+        "INSERT INTO audit_logs(actor_id,action,target_type,target_id,detail) VALUES(?,?,?,?,?)",
+        (actor_id, action, target_type, target_id, detail),
+    )
+
+
 def recommended_posts(db, user_id=None, limit=6):
     rows = db.execute(
         "SELECT p.*,u.name author_name,COALESCE(GROUP_CONCAT(t.name,' '),'') tag_names,"
@@ -186,6 +206,25 @@ def _post(db, post_id, include_hidden=False):
 def create_community_blueprint(login_required, save_image, notify):
     bp = Blueprint("community", __name__)
 
+    @bp.before_request
+    def enforce_restrictions():
+        if request.method == "GET" or not g.user:
+            return None
+        endpoint = request.endpoint or ""
+        restricted = endpoint in {
+            "community.new_post", "community.edit_post", "community.repost",
+            "community.add_comment", "community.reply_comment", "community.create_report",
+        }
+        if not restricted:
+            return None
+        row = get_db().execute(
+            "SELECT kind FROM account_restrictions WHERE user_id=? AND is_active=1 "
+            "AND ends_at>CURRENT_TIMESTAMP ORDER BY id DESC LIMIT 1",
+            (g.user["id"],),
+        ).fetchone()
+        if row:
+            abort(403, "账号当前被禁言或临时封禁。")
+
     @bp.get("/community")
     def list_posts():
         section = request.args.get("section", "").strip()
@@ -212,6 +251,12 @@ def create_community_blueprint(login_required, save_image, notify):
         if request.method == "GET":
             return render_template("community_form.html", sections=SECTIONS, post=None)
         data, error = validate_post_form(request.form)
+        db = get_db()
+        moderation = ("publish", "")
+        if not error:
+            moderation = screen_content(db, f"{data['title']}\n{data['body']}")
+            if moderation[0] == "reject":
+                error = moderation[1]
         image_name = None
         image = request.files.get("image")
         if not error and image and image.filename:
@@ -223,8 +268,8 @@ def create_community_blueprint(login_required, save_image, notify):
             return render_template(
                 "community_form.html", sections=SECTIONS, post=request.form, error=error
             ), 400
-        status = "pending" if image_name else "published"
-        db = get_db()
+        moderation = screen_content(db, f"{data['title']}\n{data['body']}", bool(image_name))
+        status = "pending" if moderation[0] == "review" else "published"
         cursor = db.execute(
             "INSERT INTO posts(author_id,section,title,body,image_name,status) VALUES(?,?,?,?,?,?)",
             (g.user["id"], data["section"], data["title"], data["body"], image_name, status),
@@ -376,6 +421,8 @@ def create_community_blueprint(login_required, save_image, notify):
         comment = request.form.get("comment", "").strip()
         if len(comment) > 300:
             abort(400, "转发评论不能超过 300 字。")
+        if screen_content(db, comment)[0] != "publish":
+            abort(400, "转发内容需要修改或人工审核。")
         db.execute(
             "INSERT INTO reposts(author_id,post_id,comment) VALUES(?,?,?) "
             "ON CONFLICT(author_id,post_id) DO UPDATE SET comment=excluded.comment,status='published'",
@@ -397,6 +444,8 @@ def create_community_blueprint(login_required, save_image, notify):
         body = request.form.get("body", "").strip()
         if not body or len(body) > 1000:
             abort(400, "评论不能为空且不能超过 1000 字。")
+        if screen_content(db, body)[0] != "publish":
+            abort(400, "评论内容需要修改或人工审核。")
         db.execute(
             "INSERT INTO comments(author_id,target_type,target_id,body) VALUES(?,?,?,?)",
             (g.user["id"], target_type, target_id, body),
@@ -429,6 +478,8 @@ def create_community_blueprint(login_required, save_image, notify):
         body = request.form.get("body", "").strip()
         if not body or len(body) > 1000:
             abort(400, "回复不能为空且不能超过 1000 字。")
+        if screen_content(db, body)[0] != "publish":
+            abort(400, "回复内容需要修改或人工审核。")
         db.execute(
             "INSERT INTO comments(author_id,target_type,target_id,parent_id,body) VALUES(?,?,?,?,?)",
             (g.user["id"], parent["target_type"], parent["target_id"], comment_id, body),
@@ -481,5 +532,31 @@ def create_community_blueprint(login_required, save_image, notify):
                 record_behavior(db, g.user["id"], kind, "post", target_id)
         db.commit()
         return redirect(_target_url(target_type, target_id))
+
+    @bp.post("/reports/<target_type>/<int:target_id>")
+    @login_required
+    def create_report(target_type, target_id):
+        db = get_db()
+        if target_type == "comment":
+            exists = db.execute(
+                "SELECT 1 FROM comments WHERE id=? AND status='published'", (target_id,)
+            ).fetchone()
+        else:
+            exists = target_exists(db, target_type, target_id)
+        if not exists:
+            abort(404)
+        reason = request.form.get("reason", "").strip()
+        if not reason or len(reason) > 300:
+            abort(400, "举报原因不能为空且不能超过 300 字。")
+        try:
+            db.execute(
+                "INSERT INTO reports(reporter_id,target_type,target_id,reason) VALUES(?,?,?,?)",
+                (g.user["id"], target_type, target_id, reason),
+            )
+            db.commit()
+        except sqlite3.IntegrityError:
+            abort(409, "该内容已有待处理举报。")
+        flash("举报已提交。", "success")
+        return redirect(_target_url(target_type, target_id) if target_type != "comment" else request.referrer or url_for("community.list_posts"))
 
     return bp
