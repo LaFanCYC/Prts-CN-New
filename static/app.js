@@ -70,4 +70,35 @@ if (toggle && sidebar) {
   });
 });
 document.addEventListener('click', function(e){ if (!e.target.closest('[data-dropdown]')) { [].forEach.call(document.querySelectorAll('[data-dropdown].open'), function(d){ d.classList.remove('open'); }); } });
+
+/* Notification dropdown */
+var notifBtn = document.querySelector('[data-notif-dropdown]');
+var notifPanel = document.querySelector('[data-notif-panel]');
+if (notifBtn && notifPanel) {
+  notifBtn.addEventListener('click', function(e){
+    e.preventDefault();e.stopPropagation();
+    var open = notifPanel.classList.toggle('open');
+    if (open) {
+      function closeN(e2){ if (!notifPanel.contains(e2.target) && e2.target !== notifBtn) { notifPanel.classList.remove('open'); document.removeEventListener('click', closeN); } }
+      setTimeout(function(){ document.addEventListener('click', closeN); }, 0);
+    }
+  });
+}
+
+/* User mini-card */
+var userTriggers = document.querySelectorAll('[data-minicard-username]');
+[].forEach.call(userTriggers, function(trigger){
+  trigger.addEventListener('click', function(e){
+    if (document.querySelector('.mini-card')) { var mc = document.querySelector('.mini-card'); mc.remove(); return; }
+    var card = document.createElement('div');
+    card.className = 'mini-card';
+    card.innerHTML = '<div class="mini-card-avatar">' + (trigger.getAttribute('data-minicard-username') || '?')[0] + '</div><div class="mini-card-info"><strong>' + trigger.getAttribute('data-minicard-username') + '</strong><span>' + trigger.getAttribute('data-minicard-grade') + ' · ' + trigger.getAttribute('data-minicard-class') + '</span></div><a href="/profile" class="mini-card-link">查看个人中心 &rarr;</a>';
+    var rect = trigger.getBoundingClientRect();
+    card.style.top = (rect.bottom + window.scrollY + 8) + 'px';
+    card.style.left = (rect.left + window.scrollX - 60) + 'px';
+    document.body.appendChild(card);
+    function closeMC(ev){ if (!card.contains(ev.target) && ev.target !== trigger) { card.remove(); document.removeEventListener('click', closeMC); } }
+    setTimeout(function(){ document.addEventListener('click', closeMC); }, 0);
+  });
+});
 })();

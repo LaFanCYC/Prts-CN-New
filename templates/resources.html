@@ -21,14 +21,14 @@
 {% if resources %}
 <div class="cards resource-grid">
 {% for resource in resources %}
-  <a class="card resource-card" href="{{ url_for('resource_detail', resource_id=resource['id']) }}">
+  <a class="card resource-card" href="{{ url_for('resource_detail', resource_id=resource['id']) }}" data-status="{{ resource['status'] }}">
     {% if resource['image_name'] %}<img src="{{ url_for('uploaded_file', filename=resource['image_name']) }}" alt="{{ resource['name'] }}">{% endif %}
     <div>
       <span class="badge">{{ resource['category'] }}</span>
       <span class="status">{{ status_labels[resource['status']] }}</span>
       <h3>{{ resource['name'] }}</h3>
       <p>{{ resource['description']|truncate(90) }}</p>
-      <small>{{ mode_labels[resource['transfer_mode']] }} · {{ resource['owner_name'] }}</small>
+      <div class="discourse-stats"><span>{{ mode_labels[resource['transfer_mode']] }}</span><span class="sep">·</span><span>{{ resource['owner_name'] }}</span><span class="sep">·</span><span>{{ resource['app_count']|default(0) }} 条申请</span><span class="sep">·</span><span>{{ resource['updated_at'][:10] if resource['updated_at'] else resource['created_at'][:10] }}</span></div>
     </div>
   </a>
 {% endfor %}

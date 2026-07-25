@@ -188,7 +188,7 @@ def create_app(test_config=None) -> Flask:
     @app.route("/")
     def index():
         resources = get_db().execute(
-            "SELECT r.*, u.name owner_name FROM resources r JOIN users u ON u.id = r.owner_id "
+            "SELECT r.*, u.name owner_name, (SELECT COUNT(*) FROM applications a WHERE a.resource_id=r.id) app_count FROM resources r JOIN users u ON u.id = r.owner_id "
             "WHERE r.status != 'withdrawn' ORDER BY r.created_at DESC LIMIT 6"
         ).fetchall()
         categories = get_db().execute("SELECT category,COUNT(*) cnt FROM resources WHERE status!='withdrawn' GROUP BY category ORDER BY cnt DESC").fetchall()
@@ -320,7 +320,7 @@ def create_app(test_config=None) -> Flask:
                 params.append(filters[key])
         db = get_db()
         rows = db.execute(
-            "SELECT r.*,u.name owner_name FROM resources r JOIN users u ON u.id=r.owner_id WHERE "
+            "SELECT r.*,u.name owner_name,(SELECT COUNT(*) FROM applications a WHERE a.resource_id=r.id) app_count FROM resources r JOIN users u ON u.id=r.owner_id WHERE "
             + " AND ".join(where)
             + " ORDER BY r.created_at DESC,r.id DESC LIMIT 12 OFFSET ?",
             (*params, (page - 1) * 12),
