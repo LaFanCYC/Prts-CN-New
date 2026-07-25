@@ -622,6 +622,32 @@ class CampusAppTest(unittest.TestCase):
                 db.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0], 1
             )
 
+    def test_community_schema_initializes_all_tables(self):
+        expected = {
+            "posts",
+            "tags",
+            "post_tags",
+            "comments",
+            "content_reactions",
+            "user_follows",
+            "tag_follows",
+            "reposts",
+            "reports",
+            "moderation_rules",
+            "account_restrictions",
+            "audit_logs",
+            "behavior_events",
+            "backup_records",
+        }
+        with self.db() as db:
+            actual = {
+                row[0]
+                for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        self.assertTrue(expected <= actual, expected - actual)
+
 
 if __name__ == "__main__":
     unittest.main()
