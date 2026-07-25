@@ -18,7 +18,7 @@
   {% for item in received %}<article class="panel">
     <a href="{{ url_for('resource_detail', resource_id=item['resource_id']) }}"><h3>{{ item['resource_name'] }}</h3></a><span class="badge">{{ application_status_labels[item['status']] }}</span><p>申请人：{{ item['applicant_name'] }}</p>
     {% if item['status'] in ['borrowed','return_pending','in_service','completion_pending'] %}<p>联系方式：{{ item['applicant_contact'] or '未填写' }}</p>{% endif %}{{ timeline(item) }}
-    <div class="actions">{% if item['status'] == 'return_pending' %}{{ action_form(url_for('application_confirm_return', application_id=item['id']), '确认归还') }}{% elif item['status'] == 'in_service' %}{{ action_form(url_for('application_request_completion', application_id=item['id']), '提交完成') }}{% endif %}{% if g.user['role']=='admin' and item['status'] in ['pending','borrowed','return_pending','in_service','completion_pending'] %}{{ action_form(url_for('resource_withdraw', resource_id=item['resource_id']), '管理员终止并下架', 'danger') }}{% endif %}</div>
+    <div class="actions">{% if item['status'] == 'return_pending' %}{{ action_form(url_for('application_confirm_return', application_id=item['id']), '确认归还') }}{% elif item['status'] == 'in_service' %}{{ action_form(url_for('application_request_completion', application_id=item['id']), '提交完成') }}{% endif %}{% if g.user['role'] in ('admin', 'owner') and item['status'] in ['pending','borrowed','return_pending','in_service','completion_pending'] %}{{ action_form(url_for('resource_withdraw', resource_id=item['resource_id']), '管理员终止并下架', 'danger') }}{% endif %}</div>
   </article>{% else %}<div class="empty panel">暂无申请。</div>{% endfor %}</div></section>
 </div>
 {% endblock %}

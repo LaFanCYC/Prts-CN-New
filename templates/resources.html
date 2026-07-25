@@ -4,6 +4,7 @@
 <div class="section-head"><div><p class="eyebrow blue">RESOURCE HUB</p><h1>资源大厅</h1></div>{% if g.user %}<a class="button" href="{{ url_for('resource_new') }}">发布资源</a>{% endif %}</div>
 <form class="filter panel" method="get">
   <input name="q" value="{{ filters.q }}" placeholder="搜索名称、描述或关键词">
+  <select name="kind"><option value="">全部供需</option><option value="supply" {{ 'selected' if filters.kind == 'supply' }}>提供</option><option value="demand" {{ 'selected' if filters.kind == 'demand' }}>求资源</option></select>
   <select name="category"><option value="">全部类别</option>{% for item in categories %}<option {{ 'selected' if filters.category == item }}>{{ item }}</option>{% endfor %}</select>
   <select name="transfer_mode"><option value="">全部方式</option>{% for value,label in mode_labels.items() %}<option value="{{ value }}" {{ 'selected' if filters.transfer_mode == value }}>{{ label }}</option>{% endfor %}</select>
   <select name="condition_level"><option value="">全部新旧程度</option>{% for item in conditions %}<option {{ 'selected' if filters.condition_level == item }}>{{ item }}</option>{% endfor %}<option {{ 'selected' if filters.condition_level == '不适用' }}>不适用</option></select>
@@ -14,7 +15,7 @@
 {% for resource in resources %}
   <a class="card resource-card" href="{{ url_for('resource_detail', resource_id=resource['id']) }}">
     {% if resource['image_name'] %}<img src="{{ url_for('uploaded_file', filename=resource['image_name']) }}" alt="{{ resource['name'] }}">{% endif %}
-    <div><span class="badge">{{ resource['category'] }}</span><span class="status">{{ status_labels[resource['status']] }}</span><h3>{{ resource['name'] }}</h3><p>{{ resource['description']|truncate(90) }}</p><small>{{ mode_labels[resource['transfer_mode']] }} · {{ resource['owner_name'] }}</small></div>
+    <div><span class="badge">{{ '求资源' if resource['kind'] == 'demand' else '提供' }}</span><span class="badge">{{ resource['category'] }}</span><span class="status">{{ status_labels[resource['status']] }}</span><h3>{{ resource['name'] }}</h3><p>{{ resource['description']|truncate(90) }}</p><small>{{ mode_labels[resource['transfer_mode']] }} · {{ resource['owner_name'] }}</small></div>
   </a>
 {% else %}<div class="empty panel">没有找到符合条件的资源。</div>{% endfor %}
 </div>

@@ -1,15 +1,179 @@
 {% extends 'base.html' %}
 {% block title %}{{ resource['name'] }} · 校园智享{% endblock %}
+
 {% block content %}
-<article class="detail panel">
-  {% if resource['image_name'] %}<img class="detail-image" src="{{ url_for('uploaded_file', filename=resource['image_name']) }}" alt="{{ resource['name'] }}">{% endif %}
-  <div><div><span class="badge">{{ resource['category'] }}</span> <span class="status">{{ status_labels[resource['status']] }}</span></div><h1>{{ resource['name'] }}</h1><p class="lead">{{ resource['description'] }}</p><dl><dt>流转方式</dt><dd>{{ mode_labels[resource['transfer_mode']] }}</dd><dt>新旧程度</dt><dd>{{ resource['condition_level'] }}</dd><dt>关键词</dt><dd>{{ resource['keywords'] or '未填写' }}</dd><dt>发布者</dt><dd>{{ resource['owner_name'] }} · {{ resource['grade'] }} · {{ resource['class_name'] }}</dd></dl>
-  {% if g.user and g.user['id'] == resource['owner_id'] %}<div class="actions"><a class="button secondary" href="{{ url_for('resource_edit', resource_id=resource['id']) }}">编辑</a><form class="inline" method="post" action="{{ url_for('resource_withdraw', resource_id=resource['id']) }}" onsubmit="return confirm('确认下架这条资源？')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="danger">下架</button></form></div>{% endif %}
-  {% if g.user and g.user['id'] != resource['owner_id'] and resource['status'] == 'available' %}
-  <form class="apply-box" method="post" action="{{ url_for('application_create', resource_id=resource['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>申请说明<textarea name="note" maxlength="300" placeholder="交换申请请说明可交换的物品或技能"></textarea></label>{% if resource['transfer_mode'] == 'borrow' %}<label>预计归还日期<input type="date" name="expected_return_date" required></label>{% endif %}<button class="primary">提交申请</button></form>
-  {% elif not g.user %}<p><a class="button" href="{{ url_for('login', next=request.path) }}">登录后申请</a></p>{% endif %}
-  </div>
-</article>
-{% if owner_applications %}<section><h2>收到的申请</h2><div class="list">{% for item in owner_applications %}<article class="panel"><div class="section-head"><strong>{{ item['applicant_name'] }}</strong><span class="badge">{{ application_status_labels[item['status']] }}</span></div><p>信用 {{ item['credit_score'] }} · {{ '优先' if item['credit_score'] >= 100 else '正常' if item['credit_score'] >= 80 else '靠后' if item['credit_score'] >= 60 else '受限' }}{% if item['recent_deductions'] %} · 近 90 天扣分：{{ item['recent_deductions'] }}{% endif %}</p><p>{{ item['note'] or '未填写申请说明' }}</p>{% if item['status'] in ['borrowed','return_pending','in_service','completion_pending'] %}<p>联系方式：{{ item['applicant_contact'] or '未填写' }}</p>{% endif %}{% if item['status'] == 'pending' %}<div class="actions"><form class="inline" method="post" action="{{ url_for('application_approve', application_id=item['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="primary">同意</button></form><form class="inline reject-form" method="post" action="{{ url_for('application_reject', application_id=item['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input name="reason" maxlength="300" placeholder="拒绝原因" required><button class="danger">拒绝</button></form></div>{% endif %}</article>{% endfor %}</div></section>{% endif %}
-{% include '_comments.html' %}
+<div class="resource-detail-page">
+  <article class="resource-hero panel">
+    <div class="resource-media{% if not resource['image_name'] %} resource-media--empty{% endif %}">
+      {% if resource['image_name'] %}
+      <img
+        class="detail-image"
+        src="{{ url_for('uploaded_file', filename=resource['image_name']) }}"
+        alt="{{ resource['name'] }}"
+      >
+      {% else %}
+      <div class="resource-placeholder" aria-hidden="true">
+        <span>校园智享</span>
+        <strong>{{ resource['category'] }}</strong>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="resource-main">
+      <header class="resource-header">
+        <div class="resource-tags">
+          <span class="badge">{{ resource['category'] }}</span>
+          <span class="status status--{{ resource['status'] }}">
+            {{ status_labels[resource['status']] }}
+          </span>
+        </div>
+        <h1>{{ resource['name'] }}</h1>
+        <p class="lead">{{ resource['description'] }}</p>
+      </header>
+
+      <dl class="resource-meta">
+        <div class="resource-meta-item">
+          <dt>流转方式</dt>
+          <dd>{{ mode_labels[resource['transfer_mode']] }}</dd>
+        </div>
+        <div class="resource-meta-item">
+          <dt>新旧程度</dt>
+          <dd>{{ resource['condition_level'] }}</dd>
+        </div>
+        <div class="resource-meta-item">
+          <dt>关键词</dt>
+          <dd>{{ resource['keywords'] or '未填写' }}</dd>
+        </div>
+        <div class="resource-meta-item">
+          <dt>发布者</dt>
+          <dd>{{ resource['owner_name'] }} · {{ resource['grade'] }} · {{ resource['class_name'] }}</dd>
+        </div>
+      </dl>
+
+      {% if g.user and g.user['id'] == resource['owner_id'] %}
+      <div class="resource-owner-actions actions">
+        <a class="button secondary" href="{{ url_for('resource_edit', resource_id=resource['id']) }}">编辑资源</a>
+        <form
+          class="inline"
+          method="post"
+          action="{{ url_for('resource_withdraw', resource_id=resource['id']) }}"
+          onsubmit="return confirm('确认下架这条资源？')"
+        >
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="danger">下架资源</button>
+        </form>
+      </div>
+      {% endif %}
+
+      {% if g.user and g.user['id'] != resource['owner_id'] and resource['status'] == 'available' %}
+      <form class="apply-box resource-apply" method="post" action="{{ url_for('application_create', resource_id=resource['id']) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="apply-box-heading">
+          <div>
+            <span class="apply-box-kicker">申请流转</span>
+            <h2>向发布者提交申请</h2>
+          </div>
+          <span class="apply-box-tip">请简要说明你的用途或可交换内容</span>
+        </div>
+
+        <label>
+          申请说明
+          <textarea
+            name="note"
+            maxlength="300"
+            placeholder="例如：希望借用两周，用于课程复习；交换申请请说明可交换的物品或技能"
+          ></textarea>
+        </label>
+
+        {% if resource['transfer_mode'] == 'borrow' %}
+        <label>
+          预计归还日期
+          <input type="date" name="expected_return_date" required>
+        </label>
+        {% endif %}
+
+        <button class="primary apply-submit">提交申请</button>
+      </form>
+      {% elif not g.user %}
+      <div class="login-prompt">
+        <div>
+          <strong>登录后即可申请</strong>
+          <p>登录账号后，可向发布者发送申请并查看处理进度。</p>
+        </div>
+        <a class="button primary" href="{{ url_for('login', next=request.path) }}">立即登录</a>
+      </div>
+      {% endif %}
+    </div>
+  </article>
+
+  {% if owner_applications %}
+  <section class="applications-section">
+    <div class="section-head applications-heading">
+      <div>
+        <span class="section-kicker">申请管理</span>
+        <h2>收到的申请</h2>
+      </div>
+      <span class="application-count">{{ owner_applications|length }} 条申请</span>
+    </div>
+
+    <div class="application-list">
+      {% for item in owner_applications %}
+      <article class="application-card panel">
+        <header class="application-card-header">
+          <div class="applicant-info">
+            <span class="applicant-avatar" aria-hidden="true">{{ item['applicant_name'][:1] }}</span>
+            <div>
+              <strong>{{ item['applicant_name'] }}</strong>
+              <span>信用分 {{ item['credit_score'] }}</span>
+            </div>
+          </div>
+          <span class="badge">{{ application_status_labels[item['status']] }}</span>
+        </header>
+
+        <div class="application-credit">
+          <span class="credit-level">
+            {{ '优先' if item['credit_score'] >= 100 else '正常' if item['credit_score'] >= 80 else '靠后' if item['credit_score'] >= 60 else '受限' }}
+          </span>
+          {% if item['recent_deductions'] %}
+          <span>近 90 天扣分：{{ item['recent_deductions'] }}</span>
+          {% else %}
+          <span>近 90 天无扣分记录</span>
+          {% endif %}
+        </div>
+
+        <div class="application-note">
+          <span>申请说明</span>
+          <p>{{ item['note'] or '未填写申请说明' }}</p>
+        </div>
+
+        {% if item['status'] in ['borrowed','return_pending','in_service','completion_pending'] %}
+        <p class="application-contact">
+          <span>联系方式</span>
+          <strong>{{ item['applicant_contact'] or '未填写' }}</strong>
+        </p>
+        {% endif %}
+
+        {% if item['status'] == 'pending' %}
+        <div class="application-actions actions">
+          <form class="inline" method="post" action="{{ url_for('application_approve', application_id=item['id']) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="primary">同意申请</button>
+          </form>
+          <form class="inline reject-form" method="post" action="{{ url_for('application_reject', application_id=item['id']) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input name="reason" maxlength="300" placeholder="填写拒绝原因" required>
+            <button class="danger">拒绝</button>
+          </form>
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="resource-comments">
+    {% include '_comments.html' %}
+  </section>
+</div>
 {% endblock %}

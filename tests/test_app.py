@@ -115,6 +115,29 @@ class CampusAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("学号已存在", response.get_data(as_text=True))
 
+    def test_legacy_admin_schema_upgrades_first_admin_to_owner(self):
+        legacy_db = Path(self.temp_dir.name) / "legacy.db"
+        connection = sqlite3.connect(legacy_db)
+        connection.executescript("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT UNIQUE, username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL, name TEXT NOT NULL, student_no TEXT NOT NULL UNIQUE,
+                grade TEXT NOT NULL, class_name TEXT NOT NULL, contact TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student','admin')),
+                is_active INTEGER NOT NULL DEFAULT 1, must_change_password INTEGER NOT NULL DEFAULT 0,
+                credit_score INTEGER NOT NULL DEFAULT 100, credit_recovered_on TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO users(username,password_hash,name,student_no,grade,class_name,role)
+            VALUES('legacy','hash','Legacy','A001','教师','管理组','admin');
+        """)
+        connection.close()
+        app = create_app({"TESTING": True, "DATABASE": str(legacy_db), "DATA_DIR": self.temp_dir.name,
+                          "UPLOAD_FOLDER": str(Path(self.temp_dir.name) / "uploads"), "SECRET_KEY": "legacy"})
+        with app.app_context():
+            with sqlite3.connect(legacy_db) as upgraded:
+                self.assertEqual(upgraded.execute("SELECT role FROM users WHERE username='legacy'").fetchone()[0], "owner")
+
     def test_credit_tiers_and_permissions_have_fixed_boundaries(self):
         self.assertEqual(credit_tier(100)["name"], "优先")
         self.assertEqual(credit_tier(80)["name"], "正常")
@@ -201,7 +224,7 @@ class CampusAppTest(unittest.TestCase):
         self.assertIn("data-ai-assistant", self.client.get("/").get_data(as_text=True))
 
         with self.db() as db:
-            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.execute("UPDATE users SET role='owner' WHERE username='alice'")
             db.commit()
         self.login()
         self.assertEqual(
@@ -237,7 +260,7 @@ class CampusAppTest(unittest.TestCase):
         self.login()
         self.publish_resource(name="Python 算法教材", description="适合算法课复习")
         with self.db() as db:
-            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.execute("UPDATE users SET role='owner' WHERE username='alice'")
             db.commit()
         self.login()
         self.client.post("/admin/ai-config", data={
@@ -492,7 +515,7 @@ class CampusAppTest(unittest.TestCase):
     def test_admin_stats_and_user_controls_protect_the_last_admin(self):
         self.register()
         with self.db() as db:
-            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.execute("UPDATE users SET role='owner' WHERE username='alice'")
             db.commit()
         self.login()
         self.publish_resource()
@@ -521,7 +544,21 @@ class CampusAppTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 409)
         with self.db() as db:
-            self.assertEqual(db.execute("SELECT role FROM users WHERE id=?", (alice_id,)).fetchone()[0], "admin")
+            self.assertEqual(db.execute("SELECT role FROM users WHERE id=?", (alice_id,)).fetchone()[0], "owner")
+
+    def test_admin_cannot_manage_staff_or_change_system_settings(self):
+        self.register()
+        self.register(username="mod", student_no="S002")
+        with self.db() as db:
+            db.execute("UPDATE users SET role='owner' WHERE username='alice'")
+            db.execute("UPDATE users SET role='admin' WHERE username='mod'")
+            db.commit()
+            admin_id = db.execute("SELECT id FROM users WHERE username='mod'").fetchone()[0]
+        self.client.post("/logout")
+        self.client.post("/login", data={"username": "mod", "password": "password1"})
+        self.assertEqual(self.client.post(f"/admin/users/1/active").status_code, 403)
+        self.assertEqual(self.client.post("/admin/backups").status_code, 403)
+        self.assertEqual(self.client.post(f"/admin/users/{admin_id}/role", data={"role": "student"}).status_code, 403)
 
     def test_admin_modules_and_resource_bulk_withdraw(self):
         self.register()
@@ -737,7 +774,7 @@ class CampusAppTest(unittest.TestCase):
     def test_create_admin_command_is_safe_and_idempotent(self):
         runner = self.app.test_cli_runner()
         result = runner.invoke(
-            args=["create-admin"],
+            args=["create-owner"],
             input="rootadmin\nstrongpass1\nstrongpass1\n平台管理员\nADMIN002\n教师\n管理组\n13800000000\n",
         )
         self.assertEqual(result.exit_code, 0, result.output)
@@ -745,14 +782,14 @@ class CampusAppTest(unittest.TestCase):
             admin = db.execute(
                 "SELECT username,role,is_active FROM users WHERE username='rootadmin'"
             ).fetchone()
-        self.assertEqual((admin["role"], admin["is_active"]), ("admin", 1))
+        self.assertEqual((admin["role"], admin["is_active"]), ("owner", 1))
 
-        second = runner.invoke(args=["create-admin"], input="")
+        second = runner.invoke(args=["create-owner"], input="")
         self.assertEqual(second.exit_code, 0, second.output)
         self.assertIn("已有有效管理员", second.output)
         with self.db() as db:
             self.assertEqual(
-                db.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0], 1
+                db.execute("SELECT COUNT(*) FROM users WHERE role='owner'").fetchone()[0], 1
             )
 
     def test_community_schema_initializes_all_tables(self):
@@ -1007,7 +1044,8 @@ class CampusAppTest(unittest.TestCase):
                 "SELECT COUNT(*) FROM behavior_events WHERE event_type='like' AND target_id=?",
                 (seed_id,),
             ).fetchone()[0]
-        self.assertEqual((views, likes), (1, 1))
+            view_count = db.execute("SELECT view_count FROM posts WHERE id=?", (seed_id,)).fetchone()[0]
+        self.assertEqual((views, likes, view_count), (1, 1, 1))
 
     def test_text_moderation_rejects_or_queues_posts(self):
         self.register()
@@ -1115,7 +1153,7 @@ class CampusAppTest(unittest.TestCase):
         self.login()
         self.assertEqual(self.client.post("/admin/backups").status_code, 403)
         with self.db() as db:
-            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.execute("UPDATE users SET role='owner' WHERE username='alice'")
             db.commit()
         self.client.post("/logout")
         self.login()
@@ -1155,7 +1193,7 @@ class CampusAppTest(unittest.TestCase):
         data = {"pattern": "代写", "severity": "review", "note": "疑似违规服务"}
         self.assertEqual(self.client.post("/admin/moderation-rules", data=data).status_code, 403)
         with self.db() as db:
-            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.execute("UPDATE users SET role='owner' WHERE username='alice'")
             db.commit()
         self.client.post("/logout")
         self.login()

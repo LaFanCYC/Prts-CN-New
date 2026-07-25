@@ -18,7 +18,7 @@ fi
 if [[ "${1:-}" == "--demo" ]]; then
   .venv/bin/python -m flask --app app init-demo
 else
-  .venv/bin/python -m flask --app app create-admin
+  .venv/bin/python -m flask --app app create-owner
 fi
 
 echo "初始化完成。运行 ./start_linux.sh 启动应用。"

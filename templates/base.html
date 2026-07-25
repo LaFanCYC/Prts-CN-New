@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -8,60 +9,93 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='ai-assistant.css') }}">
 </head>
+
 <body>
   <header class="app-header">
     <button class="sidebar-toggle" aria-label="切换侧边栏" aria-expanded="false" data-toggle-sidebar>&#9776;</button>
-    <a class="brand" href="{{ url_for('index') }}"><img src="{{ url_for('static', filename='logo.svg') }}" alt=""><span>校园智享</span></a>
+    <a class="brand" href="{{ url_for('index') }}"><img src="{{ url_for('static', filename='logo.svg') }}"
+        alt=""><span>校园智享</span></a>
     <nav class="header-nav" aria-label="主导航">
     </nav>
     <div class="header-right">
       {% if g.user %}
-        <a class="icon-btn" href="{{ url_for('notifications') }}" aria-label="通知">🔔{% if unread_count %}<span class="badge-dot"></span>{% endif %}</a>
-        <div class="user-dropdown" data-dropdown>
-          <button class="user-trigger" type="button" data-dropdown-trigger><span class="avatar">{{ g.user['name'][0] }}</span><span class="user-name">{{ g.user['name'] }}</span></button>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('profile') }}">个人中心</a>
-            <a href="{{ url_for('profile', tab='publications') }}">我的发布</a>
-            <a href="{{ url_for('profile', tab='credit') }}">信用中心</a>
-            {% if g.user['role'] == 'admin' %}<a href="{{ url_for('admin') }}">管理后台</a>{% endif %}
-            <hr>
-            <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="dropdown-item">退出登录</button></form>
-          </div>
+      <a class="icon-btn" href="{{ url_for('notifications') }}" aria-label="通知">🔔{% if unread_count %}<span
+          class="badge-dot"></span>{% endif %}</a>
+      <div class="user-dropdown" data-dropdown>
+        <button class="user-trigger" type="button" data-dropdown-trigger><span class="avatar">{{ g.user['name'][0]
+            }}</span><span class="user-name">{{ g.user['name'] }}</span></button>
+        <div class="dropdown-menu">
+          <a href="{{ url_for('profile') }}">个人中心</a>
+          <a href="{{ url_for('profile', tab='publications') }}">我的发布</a>
+          <a href="{{ url_for('profile', tab='credit') }}">信用中心</a>
+          {% if g.user['role'] in ('admin', 'owner') %}<a href="{{ url_for('admin') }}">管理后台</a>{% endif %}
+          <hr>
+          <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token"
+              value="{{ csrf_token }}"><button class="dropdown-item">退出登录</button></form>
         </div>
+      </div>
       {% else %}
-        <a href="{{ url_for('login') }}" class="btn btn-text">登录</a><a href="{{ url_for('register') }}" class="btn btn-primary btn-sm">注册</a>
+      <a href="{{ url_for('login') }}" class="btn btn-text">登录</a><a href="{{ url_for('register') }}"
+        class="btn btn-primary btn-sm">注册</a>
       {% endif %}
     </div>
   </header>
   <div class="flash-bar">
     {% for category, message in get_flashed_messages(with_categories=true) %}
-      <div class="flash {{ category }}">{{ message }}<button class="flash-close" type="button" data-close-flash>&times;</button></div>
+    <div class="flash {{ category }}">{{ message }}<button class="flash-close" type="button"
+        data-close-flash>&times;</button></div>
     {% endfor %}
   </div>
   <div class="app-body no-panel">
     <aside class="sidebar" aria-label="侧边导航" data-sidebar>
       <div class="sidebar-section">
         <h3 class="sidebar-heading">导航</h3>
-        <a href="{{ url_for('index') }}" class="sidebar-link{% if request.endpoint == 'index' %} active{% endif %}">首页</a>
-        <a href="{{ url_for('resources') }}" class="sidebar-link{% if request.endpoint == 'resources' %} active{% endif %}">资源大厅</a>
-        <a href="{{ url_for('lost_found') }}" class="sidebar-link{% if request.endpoint == 'lost_found' %} active{% endif %}">失物招领</a>
-        <a href="{{ url_for('community.list_posts') }}" class="sidebar-link{% if request.endpoint and request.endpoint.startswith('community.') %} active{% endif %}">校园社区</a>
+        <a href="{{ url_for('index') }}"
+          class="sidebar-link{% if request.endpoint == 'index' %} active{% endif %}">首页</a>
+        <a href="{{ url_for('resources') }}"
+          class="sidebar-link{% if request.endpoint == 'resources' %} active{% endif %}">资源大厅</a>
+        <a href="{{ url_for('lost_found') }}"
+          class="sidebar-link{% if request.endpoint == 'lost_found' %} active{% endif %}">失物招领</a>
+        <a href="{{ url_for('community.list_posts') }}"
+          class="sidebar-link{% if request.endpoint and request.endpoint.startswith('community.') %} active{% endif %}">校园社区</a>
         {% if g.user %}
-          <a href="{{ url_for('applications') }}" class="sidebar-link{% if request.endpoint == 'applications' %} active{% endif %}">流转记录</a>
-          <a href="{{ url_for('notifications') }}" class="sidebar-link{% if request.endpoint == 'notifications' %} active{% endif %}">通知中心</a>
-          <a href="{{ url_for('profile') }}" class="sidebar-link{% if request.endpoint == 'profile' %} active{% endif %}">个人中心</a>
+        <a href="{{ url_for('applications') }}"
+          class="sidebar-link{% if request.endpoint == 'applications' %} active{% endif %}">流转记录</a>
+        <a href="{{ url_for('notifications') }}"
+          class="sidebar-link{% if request.endpoint == 'notifications' %} active{% endif %}">通知中心</a>
+        <a href="{{ url_for('profile') }}"
+          class="sidebar-link{% if request.endpoint == 'profile' %} active{% endif %}">个人中心</a>
         {% endif %}
       </div>
-      {% if g.user and g.user['role'] == 'admin' %}<div class="sidebar-section"><h3 class="sidebar-heading">管理后台</h3><a href="{{ url_for('admin') }}" class="sidebar-link{% if request.endpoint == 'admin' %} active{% endif %}">概览</a><a href="{{ url_for('admin_users') }}" class="sidebar-link{% if request.endpoint in ('admin_users', 'admin_user_detail') %} active{% endif %}">用户管理</a><a href="{{ url_for('admin_resources') }}" class="sidebar-link{% if request.endpoint == 'admin_resources' %} active{% endif %}">资源管理</a><a href="{{ url_for('admin_content') }}" class="sidebar-link{% if request.endpoint == 'admin_content' %} active{% endif %}">内容审核</a><a href="{{ url_for('admin_credit') }}" class="sidebar-link{% if request.endpoint == 'admin_credit' %} active{% endif %}">信用管理</a><a href="{{ url_for('admin_settings') }}" class="sidebar-link{% if request.endpoint == 'admin_settings' %} active{% endif %}">系统设置</a><a href="{{ url_for('admin_audit') }}" class="sidebar-link{% if request.endpoint == 'admin_audit' %} active{% endif %}">审计日志</a></div>{% endif %}
+      {% if g.user and g.user['role'] in ('admin', 'owner') %}<div class="sidebar-section">
+        <h3 class="sidebar-heading">管理后台</h3><a href="{{ url_for('admin') }}"
+          class="sidebar-link{% if request.endpoint == 'admin' %} active{% endif %}">概览</a><a
+          href="{{ url_for('admin_users') }}"
+          class="sidebar-link{% if request.endpoint in ('admin_users', 'admin_user_detail') %} active{% endif %}">用户管理</a><a
+          href="{{ url_for('admin_resources') }}"
+          class="sidebar-link{% if request.endpoint == 'admin_resources' %} active{% endif %}">资源管理</a><a
+          href="{{ url_for('admin_content') }}"
+          class="sidebar-link{% if request.endpoint == 'admin_content' %} active{% endif %}">失物审核</a><a
+          href="{{ url_for('admin_credit') }}"
+          class="sidebar-link{% if request.endpoint == 'admin_credit' %} active{% endif %}">信用管理</a><a
+          href="{{ url_for('admin_settings') }}"
+          class="sidebar-link{% if request.endpoint == 'admin_settings' %} active{% endif %}">系统设置</a><a
+          href="{{ url_for('admin_audit') }}"
+          class="sidebar-link{% if request.endpoint == 'admin_audit' %} active{% endif %}">审计日志</a>
+      </div>{% endif %}
     </aside>
     <main class="main-area">
-      {% if request.endpoint != 'index' %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="{{ url_for('index') }}">首页</a><span>›</span><span>{{ breadcrumb_label }}</span></nav>{% endif %}
+      {% if request.endpoint != 'index' %}<nav class="breadcrumb" aria-label="面包屑导航"><a
+          href="{{ url_for('index') }}">首页</a><span>›</span><span>{{ breadcrumb_label }}</span></nav>{% endif %}
       {% block content %}{% endblock %}
-      <footer class="site-footer"><a href="{{ url_for('rules') }}">社区规则</a><a href="{{ url_for('help_center') }}">帮助中心</a><a href="{{ url_for('questioning_guide') }}">提问指南</a></footer>
+      <footer class="site-footer"><a href="{{ url_for('rules') }}">社区规则</a><a
+          href="{{ url_for('help_center') }}">帮助中心</a><a href="{{ url_for('questioning_guide') }}">提问指南</a></footer>
     </main>
   </div>
-  <div class="ai-assistant" data-ai-assistant data-ai-enabled="{{ 'true' if ai_enabled else 'false' }}" data-csrf-token="{{ csrf_token }}"></div>
+  <div class="ai-assistant" data-ai-assistant data-ai-enabled="{{ 'true' if ai_enabled else 'false' }}"
+    data-csrf-token="{{ csrf_token }}"></div>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   <script src="{{ url_for('static', filename='ai-assistant.js') }}"></script>
 </body>
+
 </html>

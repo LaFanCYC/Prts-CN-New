@@ -29,7 +29,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from community import audit, comments_for_target, create_community_blueprint, recommended_posts
+from community import audit, comments_for_target, create_community_blueprint, rebuild_tfidf_index, recommended_posts, train_cf_model
 from credit import EVENT_LABELS, TIERS, credit_tier, permission_for_score, priority_rank, record_event, score_chart, settle_credit
 from db import create_backup, default_data_dir, get_db, init_app as init_db_app, init_db
 
@@ -202,13 +202,34 @@ def create_app(test_config=None) -> Flask:
             raise click.ClickException("必填项不能为空，密码至少 8 位。")
         try:
             db.execute(
-                "INSERT INTO users(username,password_hash,name,student_no,grade,class_name,contact,role) VALUES(?,?,?,?,?,?,?,'admin')",
+                "INSERT INTO users(username,password_hash,name,student_no,grade,class_name,contact,role) VALUES(?,?,?,?,?,?,?,'owner')",
                 (username, generate_password_hash(password), name, student_no, grade, class_name, contact),
             )
             db.commit()
         except sqlite3.IntegrityError as exc:
             raise click.ClickException("用户名或工号/学号已存在。") from exc
-        click.echo(f"管理员 {username} 已创建。")
+        click.echo(f"站长 {username} 已创建。")
+
+    @app.cli.command("create-owner")
+    def create_owner_command():
+        """Create the first site owner; create-admin remains a compatibility alias."""
+        return create_admin_command.callback()
+
+    @app.cli.command("rebuild-index")
+    def rebuild_index_command():
+        try:
+            count = rebuild_tfidf_index(get_db())
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.echo(f"已重建 {count} 篇帖子的 TF-IDF 索引。")
+
+    @app.cli.command("train-cf-model")
+    def train_cf_model_command():
+        try:
+            count = train_cf_model(get_db())
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.echo(f"已使用 {count} 条交互训练 ALS 模型。")
 
     @app.route("/")
     def index():
@@ -370,7 +391,7 @@ def create_app(test_config=None) -> Flask:
         page = max(request.args.get("page", 1, type=int), 1)
         filters = {
             key: request.args.get(key, "").strip()
-            for key in ("q", "category", "transfer_mode", "condition_level", "status")
+            for key in ("q", "kind", "category", "transfer_mode", "condition_level", "status")
         }
         where = ["r.status != 'withdrawn'"]
         params = []
@@ -378,7 +399,9 @@ def create_app(test_config=None) -> Flask:
             term = f"%{filters['q']}%"
             where.append("(r.name LIKE ? OR r.description LIKE ? OR r.keywords LIKE ?)")
             params.extend((term, term, term))
-        for key in ("category", "transfer_mode", "condition_level", "status"):
+        if filters["kind"] not in {"", "supply", "demand"}:
+            filters["kind"] = ""
+        for key in ("kind", "category", "transfer_mode", "condition_level", "status"):
             if filters[key]:
                 where.append(f"r.{key} = ?")
                 params.append(filters[key])
@@ -422,9 +445,9 @@ def create_app(test_config=None) -> Flask:
             ), 400
         db = get_db()
         cursor = db.execute(
-            "INSERT INTO resources(owner_id,name,category,condition_level,transfer_mode,description,keywords,image_name) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (g.user["id"], data["name"], data["category"], data["condition_level"],
+            "INSERT INTO resources(owner_id,kind,name,category,condition_level,transfer_mode,description,keywords,image_name) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (g.user["id"], data["kind"], data["name"], data["category"], data["condition_level"],
              data["transfer_mode"], data["description"], data["keywords"], image_name),
         )
         db.commit()
@@ -499,8 +522,8 @@ def create_app(test_config=None) -> Flask:
                 conditions=CONDITION_LEVELS, resource=request.form, editing=True, error=error,
             ), 400
         db.execute(
-            "UPDATE resources SET name=?,category=?,condition_level=?,transfer_mode=?,description=?,keywords=?,image_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (data["name"], data["category"], data["condition_level"], data["transfer_mode"],
+            "UPDATE resources SET kind=?,name=?,category=?,condition_level=?,transfer_mode=?,description=?,keywords=?,image_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (data["kind"], data["name"], data["category"], data["condition_level"], data["transfer_mode"],
              data["description"], data["keywords"], image_name, resource_id),
         )
         db.commit()
@@ -516,7 +539,7 @@ def create_app(test_config=None) -> Flask:
         resource = db.execute("SELECT * FROM resources WHERE id=?", (resource_id,)).fetchone()
         if resource is None:
             abort(404)
-        is_admin = g.user["role"] == "admin"
+        is_admin = g.user["role"] in {"admin", "owner"}
         if resource["owner_id"] != g.user["id"] and not is_admin:
             abort(403)
         if resource["status"] in {"in_use", "in_service"} and not is_admin:
@@ -621,7 +644,7 @@ def create_app(test_config=None) -> Flask:
             "SELECT a.*,r.name resource_name,r.transfer_mode,u.name applicant_name,u.contact applicant_contact,u.credit_score "
             "FROM applications a JOIN resources r ON r.id=a.resource_id JOIN users u ON u.id=a.applicant_id "
         )
-        if g.user["role"] == "admin":
+        if g.user["role"] in {"admin", "owner"}:
             received = db.execute(received_sql + "ORDER BY a.applied_at DESC").fetchall()
         else:
             received = db.execute(
@@ -900,7 +923,7 @@ def create_app(test_config=None) -> Flask:
         item = db.execute("SELECT * FROM lost_found WHERE id=?", (item_id,)).fetchone()
         if item is None:
             abort(404)
-        if item["user_id"] != g.user["id"] and g.user["role"] != "admin":
+        if item["user_id"] != g.user["id"] and g.user["role"] not in {"admin", "owner"}:
             abort(403)
         allowed = {
             "resolve": item["status"] == "open",
@@ -1035,6 +1058,21 @@ def create_app(test_config=None) -> Flask:
         flash(f"已下架 {len(active_ids)} 项资源。", "success")
         return redirect(url_for("admin_resources"))
 
+    @app.post("/admin/lost-found/bulk-withdraw")
+    @admin_required
+    def admin_lost_found_bulk_withdraw():
+        item_ids = {int(item) for item in request.form.getlist("item_ids") if item.isdigit()}
+        if not item_ids:
+            abort(400, "请至少选择一条失物信息。")
+        placeholders = ",".join("?" for _ in item_ids)
+        cursor = get_db().execute(
+            f"UPDATE lost_found SET status='withdrawn',updated_at=CURRENT_TIMESTAMP "
+            f"WHERE id IN ({placeholders}) AND status!='withdrawn'", tuple(item_ids)
+        )
+        get_db().commit()
+        flash(f"已下架 {cursor.rowcount} 条失物信息。", "success")
+        return redirect(url_for("admin_content"))
+
     @app.route("/admin/content")
     @admin_required
     def admin_content():
@@ -1074,10 +1112,10 @@ def create_app(test_config=None) -> Flask:
         db = get_db(); query = " FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id WHERE " + " AND ".join(where)
         logs = db.execute("SELECT a.*,u.name actor_name" + query + " ORDER BY a.created_at DESC,a.id DESC LIMIT 30 OFFSET ?", (*params, (page - 1) * 30)).fetchall()
         total = db.execute("SELECT COUNT(*)" + query, params).fetchone()[0]
-        return render_template("admin_audit.html", logs=logs, filters=filters, page=page, has_next=page * 30 < total, admins=db.execute("SELECT id,name FROM users WHERE role='admin' ORDER BY name").fetchall())
+        return render_template("admin_audit.html", logs=logs, filters=filters, page=page, has_next=page * 30 < total, admins=db.execute("SELECT id,name FROM users WHERE role IN ('admin','owner') ORDER BY name").fetchall())
 
     @app.route("/admin/ai-config", methods=["GET", "POST"])
-    @admin_required
+    @owner_required
     def admin_ai_config():
         if request.method == "GET":
             return redirect(url_for("admin"))
@@ -1120,7 +1158,7 @@ def create_app(test_config=None) -> Flask:
         return jsonify(_admin_stats(get_db()))
 
     @app.post("/admin/users/<int:user_id>/role")
-    @admin_required
+    @owner_required
     def admin_user_role(user_id):
         role = request.form.get("role")
         if role not in {"student", "admin"}:
@@ -1129,6 +1167,8 @@ def create_app(test_config=None) -> Flask:
         user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if user is None:
             abort(404)
+        if user["role"] == "owner":
+            abort(409, "站长角色不能在后台移除。")
         if user["role"] == "admin" and role != "admin" and user["is_active"] and _active_admins(db) == 1:
             abort(409, "必须保留至少一名有效管理员。")
         db.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
@@ -1143,6 +1183,7 @@ def create_app(test_config=None) -> Flask:
         user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if user is None:
             abort(404)
+        _ensure_manageable_user(user)
         if user["role"] == "admin" and user["is_active"] and _active_admins(db) == 1:
             abort(409, "必须保留至少一名有效管理员。")
         db.execute("UPDATE users SET is_active=? WHERE id=?", (0 if user["is_active"] else 1, user_id))
@@ -1157,8 +1198,10 @@ def create_app(test_config=None) -> Flask:
         if len(password) < 8:
             abort(400, "临时密码至少 8 位。")
         db = get_db()
-        if db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone() is None:
+        user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if user is None:
             abort(404)
+        _ensure_manageable_user(user)
         db.execute(
             "UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?",
             (generate_password_hash(password), user_id),
@@ -1176,6 +1219,10 @@ def create_app(test_config=None) -> Flask:
         if not all(values[key] for key in ("username", "name", "student_no", "grade", "class_name")) or len(values["contact"]) > 100:
             abort(400, "用户资料不完整或过长。")
         db = get_db()
+        user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if user is None:
+            abort(404)
+        _ensure_manageable_user(user)
         try:
             cursor = db.execute(
                 "UPDATE users SET username=?,name=?,student_no=?,grade=?,class_name=?,contact=? WHERE id=?",
@@ -1192,7 +1239,7 @@ def create_app(test_config=None) -> Flask:
         return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/users/<int:user_id>/credit")
-    @admin_required
+    @owner_required
     def admin_credit_adjust(user_id):
         try:
             delta = int(request.form.get("delta", ""))
@@ -1296,8 +1343,10 @@ def create_app(test_config=None) -> Flask:
         if kind not in {"mute", "temp_ban"} or not reason or not 1 <= hours <= 720:
             abort(400, "限制类型、原因或时长无效。")
         db = get_db()
-        if db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone() is None:
+        user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if user is None:
             abort(404)
+        _ensure_manageable_user(user)
         modifier = f"+{hours} hours"
         db.execute(
             "INSERT INTO account_restrictions(user_id,kind,reason,ends_at,created_by) "
@@ -1313,6 +1362,10 @@ def create_app(test_config=None) -> Flask:
     @admin_required
     def admin_user_restore(user_id):
         db = get_db()
+        user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if user is None:
+            abort(404)
+        _ensure_manageable_user(user)
         db.execute(
             "UPDATE account_restrictions SET is_active=0,resolved_at=CURRENT_TIMESTAMP "
             "WHERE user_id=? AND is_active=1",
@@ -1323,7 +1376,7 @@ def create_app(test_config=None) -> Flask:
         return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/backups")
-    @admin_required
+    @owner_required
     def admin_backup_create():
         archive = create_backup(
             Path(current_app.config["DATA_DIR"]),
@@ -1347,7 +1400,7 @@ def create_app(test_config=None) -> Flask:
         )
 
     @app.post("/admin/moderation-rules")
-    @admin_required
+    @owner_required
     def admin_moderation_rule_add():
         pattern = request.form.get("pattern", "").strip()
         severity = request.form.get("severity", "")
@@ -1502,14 +1555,17 @@ def _safe_next(value):
 
 def _resource_form_data(form):
     data = {key: form.get(key, "").strip() for key in (
-        "name", "category", "condition_level", "transfer_mode", "description", "keywords"
+        "kind", "name", "category", "condition_level", "transfer_mode", "description", "keywords"
     )}
+    data["kind"] = data["kind"] or "supply"
     if not data["name"] or not data["description"]:
         return data, "请填写资源名称和描述。"
     if len(data["name"]) > 50 or len(data["description"]) > 1000:
         return data, "资源名称或描述超过长度限制。"
     if data["category"] not in RESOURCE_CATEGORIES:
         return data, "资源类别无效。"
+    if data["kind"] not in {"supply", "demand"}:
+        return data, "资源类型无效。"
     if data["category"] == "技能服务":
         data["condition_level"] = "不适用"
         if data["transfer_mode"] not in SKILL_MODES:
@@ -1685,7 +1741,7 @@ def create_matches(record_id):
 
 def _active_admins(db):
     return db.execute(
-        "SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1"
+        "SELECT COUNT(*) FROM users WHERE role IN ('admin','owner') AND is_active=1"
     ).fetchone()[0]
 
 
@@ -1719,7 +1775,7 @@ def _admin_stats(db):
 def _seed_demo():
     db = get_db()
     users = (
-        ("admin", "admin123", "系统管理员", "ADMIN001", "教师", "管理组", "admin"),
+        ("admin", "admin123", "系统站长", "ADMIN001", "教师", "管理组", "owner"),
         ("student01", "student123", "张同学", "2024001", "2024级", "软件1班", "student"),
         ("student02", "student123", "李同学", "2024002", "2024级", "设计2班", "student"),
     )
@@ -1834,10 +1890,26 @@ def admin_required(view):
     def wrapped(**kwargs):
         if g.get("user") is None:
             return redirect(url_for("login", next=request.path))
-        if g.user["role"] != "admin":
+        if g.user["role"] not in {"admin", "owner"}:
             abort(403)
         return view(**kwargs)
     return wrapped
+
+
+def owner_required(view):
+    @wraps(view)
+    def wrapped(**kwargs):
+        if g.get("user") is None:
+            return redirect(url_for("login", next=request.path))
+        if g.user["role"] != "owner":
+            abort(403)
+        return view(**kwargs)
+    return wrapped
+
+
+def _ensure_manageable_user(user):
+    if g.user["role"] != "owner" and user["role"] != "student":
+        abort(403, "管理员不能操作其他管理员。")
 
 
 if __name__ == "__main__":

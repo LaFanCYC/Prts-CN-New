@@ -28,7 +28,7 @@ if errorlevel 1 exit /b 1
 if /i "%~1"=="--demo" (
   ".venv\Scripts\python.exe" -m flask --app app init-demo
 ) else (
-  ".venv\Scripts\python.exe" -m flask --app app create-admin
+  ".venv\Scripts\python.exe" -m flask --app app create-owner
 )
 if errorlevel 1 exit /b 1
 

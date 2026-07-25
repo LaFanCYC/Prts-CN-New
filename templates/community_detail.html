@@ -7,7 +7,7 @@
   {% if post.image_name %}<img class="detail-image" src="{{ url_for('uploaded_file', filename=post.image_name) }}" alt="{{ post.title }}">{% endif %}
   <p class="lead">{{ post.body }}</p>
   <div class="actions">{% for tag in tags %}<form class="inline" method="post" action="{{ url_for('community.follow_tag', tag_id=tag.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="badge">#{{ tag.name }}</button></form>{% endfor %}</div>
-  <p><small>帖子 UID：{{ post.uid }} · 作者：{{ post.author_name }} · {{ post.created_at }} · {{ likes }} 人点赞</small></p>
+  <p><small>帖子 UID：{{ post.uid }} · 作者：{{ post.author_name }}{% if viewer_state.following %} · 已关注{% endif %} · {{ post.created_at }} · {{ views }} 次浏览 · {{ likes }} 人点赞 · {{ favorites }} 人收藏</small></p>
   {% if g.user %}
   <div class="interaction-actions" aria-label="帖子操作">
     <form method="post" action="{{ url_for('community.react', target_type='post', target_id=post.id, kind='like') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="interaction-button{{ ' is-active' if viewer_state.liked else '' }}">{{ '已点赞' if viewer_state.liked else '点赞' }} <span>{{ likes }}</span></button></form>

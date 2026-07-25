@@ -4,6 +4,7 @@
 <section class="panel"><h1>{{ '编辑' if editing else '发布' }}资源或技能服务</h1>{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
 <form method="post" enctype="multipart/form-data" data-resource-form>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>发布类型<select name="kind"><option value="supply" {{ 'selected' if not resource or resource['kind'] == 'supply' }}>提供资源</option><option value="demand" {{ 'selected' if resource and resource['kind'] == 'demand' }}>求资源</option></select></label>
   <label>名称<input name="name" maxlength="50" value="{{ resource['name'] if resource else '' }}" required></label>
   <div class="form-grid"><label>类别<select name="category" data-category required>{% for item in categories %}<option {{ 'selected' if resource and resource['category'] == item }}>{{ item }}</option>{% endfor %}</select></label>
   <label>新旧程度<select name="condition_level" data-condition>{% for item in conditions %}<option {{ 'selected' if resource and resource['condition_level'] == item }}>{{ item }}</option>{% endfor %}<option value="不适用">不适用</option></select></label></div>

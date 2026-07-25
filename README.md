@@ -25,9 +25,11 @@ init_windows.bat
 start_windows.bat
 ```
 
-初始化脚本会创建 `.venv`、安装依赖、初始化数据库，并在尚无管理员时交互创建管理员。若只用于本地演示，可执行 `./init_linux.sh --demo` 或 `init_windows.bat --demo`，写入下方演示账号。
+初始化脚本会创建 `.venv`、安装依赖、初始化数据库，并在尚无站长时交互创建首位站长。若只用于本地演示，可执行 `./init_linux.sh --demo` 或 `init_windows.bat --demo`，写入下方演示账号。
 
 启动脚本默认监听 `127.0.0.1:5000`。可用 `CAMPUS_DATA_DIR` 指定数据库和上传目录；局域网部署前可设置环境变量：
+
+推荐索引按需离线构建：`flask --app app rebuild-index` 重建 TF-IDF 索引，`flask --app app train-cf-model` 训练 ALS 协同过滤模型；模型未生成时会自动使用基础推荐。
 
 ```bash
 CAMPUS_DATA_DIR=/srv/campus-data CAMPUS_HOST=0.0.0.0 CAMPUS_PORT=8000 ./start_linux.sh

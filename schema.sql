@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     grade TEXT NOT NULL,
     class_name TEXT NOT NULL,
     contact TEXT NOT NULL DEFAULT '',
-    role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
+    role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin', 'owner')),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1)),
     credit_score INTEGER NOT NULL DEFAULT 100 CHECK (credit_score BETWEEN 0 AND 120),
@@ -28,6 +28,7 @@ END;
 CREATE TABLE IF NOT EXISTS resources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_id INTEGER NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL DEFAULT 'supply' CHECK (kind IN ('supply', 'demand')),
     name TEXT NOT NULL,
     category TEXT NOT NULL,
     condition_level TEXT NOT NULL,
@@ -105,6 +106,8 @@ CREATE TABLE IF NOT EXISTS posts (
     section TEXT NOT NULL CHECK (section IN ('resource', 'lost_found', 'study', 'campus', 'feedback')),
     title TEXT NOT NULL,
     body TEXT NOT NULL,
+    original_body TEXT NOT NULL DEFAULT '',
+    view_count INTEGER NOT NULL DEFAULT 0,
     image_name TEXT,
     status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published', 'pending', 'withdrawn')),
     moderation_reason TEXT NOT NULL DEFAULT '',
@@ -137,6 +140,7 @@ CREATE TABLE IF NOT EXISTS comments (
     target_id INTEGER NOT NULL,
     parent_id INTEGER REFERENCES comments(id),
     body TEXT NOT NULL,
+    original_body TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published', 'withdrawn')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
