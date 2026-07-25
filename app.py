@@ -80,14 +80,14 @@ def create_app(test_config=None) -> Flask:
         or default_data_dir()
     )
     try:
-        data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        data_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
     if os.name != "nt":
         data_dir.chmod(0o700)
     upload_dir = Path((test_config or {}).get("UPLOAD_FOLDER", data_dir / "uploads"))
     try:
-        upload_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        upload_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
     if os.name != "nt":
