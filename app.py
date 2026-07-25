@@ -52,9 +52,9 @@ APPLICATION_STATUS_LABELS = {
     "in_service": "服务进行中", "completion_pending": "待确认完成", "withdrawn": "已撤销",
 }
 DEFAULT_AI_SYSTEM_PROMPT = (
-    "你是一个校园资源共享平台的搜索助手。根据用户的搜索描述和平台内匹配到的"
-    "内容列表，帮助用户整理最相关的结果，用简洁的中文说明每个结果为什么可能"
-    "符合他的需求。只返回 JSON 数组，每项包含 id 和 reason，不要额外解释。"
+    "你是一个校园资源共享平台的搜索助手。根据用户的搜索描述，从平台提供的全部"
+    "公开内容中选择最相关的结果并排序，用简洁中文说明原因。只返回 JSON 数组，"
+    "每项包含 id 和 reason；只能使用提供的 id，最多返回指定数量，不要额外解释。"
 )
 
 
@@ -173,14 +173,12 @@ def create_app(test_config=None) -> Flask:
             return jsonify(results=[], mode="keyword")
         if len(query) > 100:
             abort(400, "搜索内容不能超过 100 个字符。")
-        results = search_content(query)
         config = _ai_config(get_db())
-        if config["enabled"] and results:
-            enhanced = ai_enhance_results(query, results, config)
+        if config["enabled"]:
+            enhanced = ai_enhance_results(query, public_search_content(), config)
             if enhanced is not None:
-                results = enhanced
-                return jsonify(results=results, mode="ai")
-        return jsonify(results=results, mode="keyword")
+                return jsonify(results=enhanced, mode="ai")
+        return jsonify(results=search_content(query), mode="keyword")
 
     @app.cli.command("init-demo")
     def init_demo_command():
@@ -1421,15 +1419,31 @@ def search_content(query):
     ]
 
 
+def public_search_content():
+    rows = get_db().execute(
+        "SELECT 'resource' AS type,id,name AS title,description AS summary,created_at FROM resources WHERE status!='withdrawn' "
+        "UNION ALL SELECT 'post',id,title,body,created_at FROM posts WHERE status='published' "
+        "UNION ALL SELECT 'lost_found',id,title,description,created_at FROM lost_found WHERE status!='withdrawn'"
+    ).fetchall()
+    labels = {"resource": "资源", "post": "社区帖子", "lost_found": "失物招领"}
+    endpoints = {
+        "resource": lambda item: url_for("resource_detail", resource_id=item["id"]),
+        "post": lambda item: url_for("community.post_detail", post_id=item["id"]),
+        "lost_found": lambda item: url_for("lost_found_detail", item_id=item["id"]),
+    }
+    return [{"id": f"{row['type']}:{row['id']}", "type": labels[row["type"]], "title": row["title"], "summary": row["summary"][:200], "url": endpoints[row["type"]](row)} for row in rows]
+
+
 def ai_enhance_results(query, results, config):
     prompt_results = [
         {key: result[key] for key in ("id", "type", "title", "summary")}
-        for result in results[:config["max_results"]]
+        for result in results
     ]
     body = json.dumps(
         {
             "query": query,
             "results": prompt_results,
+            "max_results": config["max_results"],
         },
         ensure_ascii=False,
     ).encode("utf-8")
@@ -1454,17 +1468,20 @@ def ai_enhance_results(query, results, config):
         with urlopen(request_obj, timeout=5) as response:
             content = json.loads(response.read().decode("utf-8"))["choices"][0]["message"]["content"]
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
-        reasons = {
-            item["id"]: item["reason"].strip()[:300]
-            for item in json.loads(content)
-            if isinstance(item, dict)
-            and item.get("id") in {result["id"] for result in prompt_results}
-            and isinstance(item.get("reason"), str)
-            and item["reason"].strip()
-        }
+        selected = json.loads(content)
     except (HTTPError, URLError, OSError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
         return None
-    return [{**result, **({"reason": reasons[result["id"]]} if result["id"] in reasons else {})} for result in results]
+    by_id = {result["id"]: result for result in results}
+    enhanced, seen = [], set()
+    for item in selected:
+        item_id = item.get("id") if isinstance(item, dict) else None
+        reason = item.get("reason") if isinstance(item, dict) else None
+        if item_id in by_id and item_id not in seen and isinstance(reason, str) and reason.strip():
+            enhanced.append({**by_id[item_id], "reason": reason.strip()[:300]})
+            seen.add(item_id)
+        if len(enhanced) == config["max_results"]:
+            break
+    return enhanced
 
 
 def _safe_next(value):

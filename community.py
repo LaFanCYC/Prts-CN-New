@@ -228,21 +228,32 @@ def create_community_blueprint(login_required, save_image, notify):
     @bp.get("/community")
     def list_posts():
         section = request.args.get("section", "").strip()
+        q = request.args.get("q", "").strip()
+        sort = request.args.get("sort", "new")
+        page = max(request.args.get("page", 1, type=int), 1)
         params = []
         where = ["p.status='published'"]
         if section in SECTIONS:
             where.append("p.section=?")
             params.append(section)
-        posts = get_db().execute(
-            "SELECT p.*,u.name author_name FROM posts p JOIN users u ON u.id=p.author_id "
-            "WHERE " + " AND ".join(where) + " ORDER BY p.created_at DESC,p.id DESC LIMIT 24",
-            params,
+        if q:
+            where.append("(p.title LIKE ? OR p.body LIKE ?)")
+            params.extend([f"%{q}%"] * 2)
+        order = "p.created_at DESC,p.id DESC" if sort == "new" else "likes DESC,comment_count DESC,p.created_at DESC"
+        db = get_db()
+        query = " FROM posts p JOIN users u ON u.id=p.author_id WHERE " + " AND ".join(where)
+        posts = db.execute(
+            "SELECT p.*,u.name author_name,(SELECT COUNT(*) FROM content_reactions r WHERE r.target_type='post' AND r.target_id=p.id AND r.kind='like') likes,(SELECT COUNT(*) FROM comments c WHERE c.target_type='post' AND c.target_id=p.id AND c.status='published') comment_count"
+            + query + " ORDER BY " + order + " LIMIT 20 OFFSET ?", (*params, (page - 1) * 20),
         ).fetchall()
+        total = db.execute("SELECT COUNT(*)" + query, params).fetchone()[0]
+        counts = {row[0]: row[1] for row in db.execute("SELECT section,COUNT(*) FROM posts WHERE status='published' GROUP BY section")}
         if g.user and section in SECTIONS:
-            record_behavior(get_db(), g.user["id"], "view_section", "section", list(SECTIONS).index(section) + 1)
-            get_db().commit()
+            record_behavior(db, g.user["id"], "view_section", "section", list(SECTIONS).index(section) + 1)
+            db.commit()
         return render_template(
-            "community_list.html", posts=posts, sections=SECTIONS, selected=section
+            "community_list.html", posts=posts, sections=SECTIONS, selected=section, counts=counts,
+            q=q, sort=sort if sort in {"new", "hot"} else "new", page=page, has_next=page * 20 < total,
         )
 
     @bp.route("/community/new", methods=("GET", "POST"))
@@ -296,12 +307,18 @@ def create_community_blueprint(login_required, save_image, notify):
             (post_id,),
         ).fetchall()
         comments = comments_for_target(db, "post", post_id, request.args.get("order", "new"))
+        likes = db.execute("SELECT COUNT(*) FROM content_reactions WHERE target_type='post' AND target_id=? AND kind='like'", (post_id,)).fetchone()[0]
+        viewer_state = {"liked": False, "favorited": False, "following": False}
+        if viewer_id:
+            reactions = {row[0] for row in db.execute("SELECT kind FROM content_reactions WHERE user_id=? AND target_type='post' AND target_id=?", (viewer_id, post_id))}
+            viewer_state.update(liked="like" in reactions, favorited="favorite" in reactions,
+                                following=bool(db.execute("SELECT 1 FROM user_follows WHERE follower_id=? AND followed_id=?", (viewer_id, post["author_id"])).fetchone()))
         if g.user and post["status"] == "published":
             record_behavior(db, g.user["id"], "view_post", "post", post_id)
             db.commit()
         return render_template(
             "community_detail.html", post=post, tags=tags, reposts=reposts,
-            comments=comments, target_type="post", target_id=post_id,
+            comments=comments, target_type="post", target_id=post_id, likes=likes, viewer_state=viewer_state,
         )
 
     @bp.route("/community/<int:post_id>/edit", methods=("GET", "POST"))
