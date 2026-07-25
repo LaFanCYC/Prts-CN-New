@@ -5,6 +5,7 @@
 <ol class="timeline"><li>提交申请：{{ item['applied_at'] }}</li>{% if item['approved_at'] %}<li>审批通过 / 流转开始：{{ item['approved_at'] }}</li>{% endif %}{% if item['action_at'] %}<li>{{ '拒绝处理' if item['status']=='rejected' else '发起归还或提交完成' }}：{{ item['action_at'] }}</li>{% endif %}{% if item['completed_at'] %}<li>流转结束：{{ item['completed_at'] }}</li>{% endif %}</ol>
 {% endmacro %}
 {% block content %}
+{% block breadcrumb %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="/">首页</a><span>/</span><span>流转记录</span></nav>{% endblock %}
 <h1>流转记录</h1>
 <div class="two-columns">
   <section><h2>我的申请</h2><div class="list">

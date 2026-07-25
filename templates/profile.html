@@ -1,6 +1,7 @@
 ﻿{% extends 'base.html' %}
 {% block title %}个人中心 · {{ g.user['name'] }} · 校园智享{% endblock %}
 {% block content %}
+{% block breadcrumb %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="/">首页</a><span>/</span><span>个人中心</span></nav>{% endblock %}
 <div class="profile-banner">
   <div class="profile-avatar">{{ g.user['name'][0] }}</div>
   <div class="profile-info">

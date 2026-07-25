@@ -486,3 +486,9 @@ details summary{margin-bottom:12px;font-size:13px;color:var(--muted);cursor:poin
 .resource-card[data-status="in_use"]{border-left-color:var(--amber)}
 .resource-card[data-status="in_service"]{border-left-color:var(--amber)}
 .resource-card[data-status="completed"]{border-left-color:var(--muted)}
+
+/* === Breadcrumb navigation === */
+.breadcrumb{display:flex;align-items:center;gap:6px;padding:0 0 12px;font-size:12px;color:var(--muted)}
+.breadcrumb a{color:var(--muted);text-decoration:none}
+.breadcrumb a:hover{color:var(--blue);text-decoration:underline}
+.breadcrumb span{opacity:.5}

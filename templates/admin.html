@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}管理后台 · 校园智享{% endblock %}
 {% block content %}
+{% block breadcrumb %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="/">首页</a><span>/</span><span>管理后台</span></nav>{% endblock %}
 <h1>管理后台</h1>
 {% set labels={'users':'用户总数','resources':'资源总数','pending':'待审批','borrowing':'借用中','completed':'已完成流转','lost':'寻物信息','found':'拾物信息','matches':'成功匹配'} %}
 <section class="stats">{% for key,value in stats.summary.items() %}<article class="stat"><strong>{{ value }}</strong><span>{{ labels[key] }}</span></article>{% endfor %}</section>

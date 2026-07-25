@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}{{ resource['name'] }} · 校园智享{% endblock %}
 {% block content %}
+{% block breadcrumb %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="/">首页</a><span>/</span><a href="/resources">资源大厅</a><span>/</span><span>{{ resource["name"] }}</span></nav>{% endblock %}
 <article class="detail panel">
   {% if resource['image_name'] %}<img class="detail-image" src="{{ url_for('uploaded_file', filename=resource['image_name']) }}" alt="{{ resource['name'] }}">{% endif %}
   <div><div><span class="badge">{{ resource['category'] }}</span> <span class="status">{{ status_labels[resource['status']] }}</span></div><h1>{{ resource['name'] }}</h1><p class="lead">{{ resource['description'] }}</p><dl><dt>流转方式</dt><dd>{{ mode_labels[resource['transfer_mode']] }}</dd><dt>新旧程度</dt><dd>{{ resource['condition_level'] }}</dd><dt>关键词</dt><dd>{{ resource['keywords'] or '未填写' }}</dd><dt>发布者</dt><dd>{{ resource['owner_name'] }} · {{ resource['grade'] }} · {{ resource['class_name'] }}</dd></dl>
