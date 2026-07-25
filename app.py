@@ -132,6 +132,14 @@ def create_app(test_config=None) -> Flask:
                 "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0",
                 (g.user["id"],),
             ).fetchone()[0]
+        endpoint = request.endpoint or ""
+        breadcrumb_label = next((label for prefix, label in (
+            ("community.", "校园社区"), ("resource", "资源大厅"),
+            ("lost_found", "失物招领"), ("application", "流转记录"),
+            ("notification", "通知"), ("profile", "个人中心"),
+            ("admin", "管理后台"), ("rules", "社区规则"),
+            ("help", "帮助中心"), ("questioning", "提问指南"),
+        ) if endpoint.startswith(prefix)), "当前位置")
         return {
             "csrf_token": token,
             "unread_count": unread,
@@ -139,6 +147,7 @@ def create_app(test_config=None) -> Flask:
             "status_labels": STATUS_LABELS,
             "application_status_labels": APPLICATION_STATUS_LABELS,
             "today": date.today().isoformat(),
+            "breadcrumb_label": breadcrumb_label,
         }
 
     @app.cli.command("init-demo")
@@ -173,11 +182,34 @@ def create_app(test_config=None) -> Flask:
 
     @app.route("/")
     def index():
-        resources = get_db().execute(
+        db = get_db()
+        resources = db.execute(
             "SELECT r.*, u.name owner_name FROM resources r JOIN users u ON u.id = r.owner_id "
             "WHERE r.status != 'withdrawn' ORDER BY r.created_at DESC LIMIT 6"
         ).fetchall()
-        return render_template("home.html", resources=resources)
+        posts = db.execute(
+            "SELECT p.*,u.name author_name FROM posts p JOIN users u ON u.id=p.author_id "
+            "WHERE p.status='published' ORDER BY p.created_at DESC,p.id DESC LIMIT 6"
+        ).fetchall()
+        lost_items = db.execute(
+            "SELECT lf.*,u.name owner_name FROM lost_found lf JOIN users u ON u.id=lf.user_id "
+            "WHERE lf.status!='withdrawn' ORDER BY lf.created_at DESC,lf.id DESC LIMIT 6"
+        ).fetchall()
+        return render_template(
+            "home.html", resources=resources, posts=posts, lost_items=lost_items
+        )
+
+    @app.get("/rules")
+    def rules():
+        return render_template("community_rules.html")
+
+    @app.get("/help")
+    def help_center():
+        return render_template("community_help.html")
+
+    @app.get("/questioning-guide")
+    def questioning_guide():
+        return render_template("questioning_guide.html")
 
     @app.route("/register", methods=("GET", "POST"))
     def register():

@@ -1,7 +1,9 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="hero"><p class="eyebrow">资源流转 · 技能互助 · 失物归还</p><h1>让校园里的每份资源，再多发挥一次价值</h1><p>发布闲置教材与器材，交换技能，也让失物更快回到主人身边。</p></section>
-<section><div class="section-head"><h2>最新资源</h2></div><div class="cards">
-{% for resource in resources %}<article class="card"><span class="badge">{{ resource['category'] }}</span><h3>{{ resource['name'] }}</h3><p>{{ resource['description']|truncate(80) }}</p><small>{{ resource['owner_name'] }}</small></article>{% else %}<div class="empty">还没有资源，登录后发布第一条吧。</div>{% endfor %}
-</div></section>
+<header class="compact-intro"><div><p class="eyebrow blue">校园智享</p><h1>资源流转与校园互助</h1></div><div class="actions"><a class="button" href="{{ url_for('resources') }}">浏览资源</a><a class="secondary button" href="{{ url_for('community.list_posts') }}">进入社区</a></div></header>
+<div class="home-grid">
+  <section><div class="section-head"><h2>推荐帖子</h2><a href="{{ url_for('community.list_posts') }}">更多</a></div><div class="list">{% for post in posts %}<article class="card"><span class="badge">{{ post['section'] }}</span><h3><a href="{{ url_for('community.post_detail', post_id=post['id']) }}">{{ post['title'] }}</a></h3><p>{{ post['body']|truncate(70) }}</p><small>{{ post['author_name'] }}</small></article>{% else %}<div class="empty">暂无帖子</div>{% endfor %}</div></section>
+  <section><div class="section-head"><h2>最新资源</h2><a href="{{ url_for('resources') }}">更多</a></div><div class="list">{% for resource in resources %}<article class="card"><span class="badge">{{ resource['category'] }}</span><h3><a href="{{ url_for('resource_detail', resource_id=resource['id']) }}">{{ resource['name'] }}</a></h3><p>{{ resource['description']|truncate(70) }}</p><small>{{ resource['owner_name'] }}</small></article>{% else %}<div class="empty">暂无资源</div>{% endfor %}</div></section>
+  <section><div class="section-head"><h2>失物招领</h2><a href="{{ url_for('lost_found') }}">更多</a></div><div class="list">{% for item in lost_items %}<article class="card"><span class="badge">{{ '寻物' if item['kind']=='lost' else '拾物' }}</span><h3><a href="{{ url_for('lost_found_detail', item_id=item['id']) }}">{{ item['title'] }}</a></h3><p>{{ item['location'] }}</p><small>{{ item['owner_name'] }}</small></article>{% else %}<div class="empty">暂无失物信息</div>{% endfor %}</div></section>
+</div>
 {% endblock %}

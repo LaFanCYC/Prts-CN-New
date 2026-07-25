@@ -818,6 +818,45 @@ class CampusAppTest(unittest.TestCase):
                 db.execute("SELECT COUNT(*) FROM content_reactions").fetchone()[0], 0
             )
 
+    def test_home_uses_three_compact_lists_and_guidance_pages(self):
+        self.register()
+        self.login()
+        self.publish_post(title="如何选择 Python 教材")
+        self.publish_resource(name="数据结构教材")
+        self.client.post(
+            "/lost-found/new/lost",
+            data={
+                "title": "黑色雨伞",
+                "description": "食堂门口遗失",
+                "occurred_on": date.today().isoformat(),
+                "location": "一食堂",
+                "keywords": "雨伞,黑色",
+            },
+        )
+
+        text = self.client.get("/").get_data(as_text=True)
+        self.assertNotIn("让校园里的每份资源，再多发挥一次价值", text)
+        for heading, item in (
+            ("推荐帖子", "如何选择 Python 教材"),
+            ("最新资源", "数据结构教材"),
+            ("失物招领", "黑色雨伞"),
+        ):
+            self.assertIn(heading, text)
+            self.assertIn(item, text)
+
+        resource_id = self.resource_id("数据结构教材")
+        detail = self.client.get(f"/resources/{resource_id}").get_data(as_text=True)
+        self.assertIn("面包屑导航", detail)
+        self.assertIn("资源大厅", detail)
+        for path, title in (
+            ("/rules", "社区规则"),
+            ("/help", "帮助中心"),
+            ("/questioning-guide", "如何提出好问题"),
+        ):
+            page = self.client.get(path)
+            self.assertEqual(page.status_code, 200)
+            self.assertIn(title, page.get_data(as_text=True))
+
 
 if __name__ == "__main__":
     unittest.main()

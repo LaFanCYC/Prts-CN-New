@@ -16,6 +16,7 @@
       <a href="{{ url_for('index') }}">首页</a>
       <a href="{{ url_for('resources') }}">资源大厅</a>
       <a href="{{ url_for('lost_found') }}">失物招领</a>
+      <a href="{{ url_for('community.list_posts') }}">校园社区</a>
       {% if g.user %}
         <a href="{{ url_for('applications') }}">流转记录</a>
         <a href="{{ url_for('notifications') }}">通知{% if unread_count %}<span class="count">{{ unread_count }}</span>{% endif %}</a>
@@ -30,10 +31,12 @@
     </nav>
   </header>
   <main class="container">
+    {% if request.endpoint != 'index' %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="{{ url_for('index') }}">首页</a><span>›</span><span>{{ breadcrumb_label }}</span></nav>{% endif %}
     {% for category, message in get_flashed_messages(with_categories=true) %}
       <div class="flash {{ category }}">{{ message }}</div>
     {% endfor %}
     {% block content %}{% endblock %}
+    <footer class="site-footer"><a href="{{ url_for('rules') }}">社区规则</a><a href="{{ url_for('help_center') }}">帮助中心</a><a href="{{ url_for('questioning_guide') }}">提问指南</a></footer>
   </main>
 </body>
 </html>
