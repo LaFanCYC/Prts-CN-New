@@ -774,7 +774,9 @@ def create_app(test_config=None) -> Flask:
     @app.route("/lost-found")
     def lost_found():
         page = max(request.args.get("page", 1, type=int), 1)
-        filters = {key: request.args.get(key, "").strip() for key in ("q", "kind", "status")}
+        filters = {key: request.args.get(key, "").strip() for key in (
+            "q", "kind", "status", "date_from", "date_to"
+        )}
         where = ["lf.status != 'withdrawn'"]
         params = []
         if filters["q"]:
@@ -787,6 +789,14 @@ def create_app(test_config=None) -> Flask:
         if filters["status"] in {"open", "resolved"}:
             where.append("lf.status=?")
             params.append(filters["status"])
+        for key, operator in (("date_from", ">="), ("date_to", "<=")):
+            if filters[key]:
+                try:
+                    date.fromisoformat(filters[key])
+                except ValueError:
+                    abort(400, "日期格式无效。")
+                where.append(f"lf.occurred_on {operator} ?")
+                params.append(filters[key])
         db = get_db()
         items = db.execute(
             "SELECT lf.*,u.name owner_name FROM lost_found lf JOIN users u ON u.id=lf.user_id WHERE "
@@ -946,45 +956,118 @@ def create_app(test_config=None) -> Flask:
         return render_template(
             "admin.html",
             stats=_admin_stats(db),
-            users=db.execute("SELECT * FROM users ORDER BY created_at DESC,id DESC").fetchall(),
-            resources=db.execute(
-                "SELECT r.*,u.name owner_name FROM resources r JOIN users u ON u.id=r.owner_id "
-                "WHERE r.status!='withdrawn' ORDER BY r.created_at DESC"
-            ).fetchall(),
-            lost_items=db.execute(
-                "SELECT lf.*,u.name owner_name FROM lost_found lf JOIN users u ON u.id=lf.user_id "
-                "WHERE lf.status!='withdrawn' ORDER BY lf.created_at DESC"
-            ).fetchall(),
-            reports=db.execute(
-                "SELECT r.*,u.name reporter_name FROM reports r JOIN users u ON u.id=r.reporter_id "
-                "WHERE r.status='open' ORDER BY r.created_at"
-            ).fetchall(),
-            pending_posts=db.execute(
-                "SELECT p.*,u.name author_name FROM posts p JOIN users u ON u.id=p.author_id "
-                "WHERE p.status='pending' ORDER BY p.created_at"
-            ).fetchall(),
-            restrictions=db.execute(
-                "SELECT ar.*,u.name user_name FROM account_restrictions ar JOIN users u ON u.id=ar.user_id "
-                "WHERE ar.is_active=1 AND ar.ends_at>CURRENT_TIMESTAMP ORDER BY ar.created_at DESC"
-            ).fetchall(),
             audit_logs=db.execute(
                 "SELECT a.*,u.name actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id "
-                "ORDER BY a.created_at DESC,a.id DESC LIMIT 100"
+                "ORDER BY a.created_at DESC,a.id DESC LIMIT 10"
             ).fetchall(),
-            backups=db.execute(
-                "SELECT b.*,u.name creator_name FROM backup_records b LEFT JOIN users u ON u.id=b.created_by "
-                "ORDER BY b.created_at DESC,b.id DESC LIMIT 20"
-            ).fetchall(),
-            moderation_rules=db.execute(
-                "SELECT * FROM moderation_rules ORDER BY is_active DESC,severity,pattern"
-            ).fetchall(),
-            credit_appeals=db.execute(
-                "SELECT ca.*,ce.delta,ce.reason event_reason,u.name user_name FROM credit_appeals ca "
-                "JOIN credit_events ce ON ce.id=ca.event_id JOIN users u ON u.id=ca.user_id "
-                "WHERE ca.status='pending' ORDER BY ca.created_at"
-            ).fetchall(),
-            ai_config=_ai_config(db),
+            todo={
+                "posts": db.execute("SELECT COUNT(*) FROM posts WHERE status='pending'").fetchone()[0],
+                "reports": db.execute("SELECT COUNT(*) FROM reports WHERE status='open'").fetchone()[0],
+                "appeals": db.execute("SELECT COUNT(*) FROM credit_appeals WHERE status='pending'").fetchone()[0],
+            },
         )
+
+    @app.route("/admin/users")
+    @admin_required
+    def admin_users():
+        page = max(request.args.get("page", 1, type=int), 1)
+        q = request.args.get("q", "").strip()
+        where, params = ["1=1"], []
+        if q:
+            where.append("(name LIKE ? OR username LIKE ? OR student_no LIKE ?)")
+            params.extend([f"%{q}%"] * 3)
+        db = get_db()
+        users = db.execute("SELECT * FROM users WHERE " + " AND ".join(where) + " ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?", (*params, (page - 1) * 20)).fetchall()
+        total = db.execute("SELECT COUNT(*) FROM users WHERE " + " AND ".join(where), params).fetchone()[0]
+        return render_template("admin_users.html", users=users, q=q, page=page, has_next=page * 20 < total)
+
+    @app.route("/admin/users/<int:user_id>")
+    @admin_required
+    def admin_user_detail(user_id):
+        db = get_db()
+        user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if user is None:
+            abort(404)
+        return render_template("admin_user_detail.html", user=user,
+            events=db.execute("SELECT * FROM credit_events WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 20", (user_id,)).fetchall(),
+            restrictions=db.execute("SELECT * FROM account_restrictions WHERE user_id=? ORDER BY created_at DESC", (user_id,)).fetchall())
+
+    @app.route("/admin/resources")
+    @admin_required
+    def admin_resources():
+        page = max(request.args.get("page", 1, type=int), 1)
+        filters = {key: request.args.get(key, "").strip() for key in ("q", "category", "mode", "status", "sort")}
+        where, params = ["1=1"], []
+        if filters["q"]:
+            where.append("(r.name LIKE ? OR u.name LIKE ? OR u.student_no LIKE ?)")
+            params.extend([f"%{filters['q']}%"] * 3)
+        if filters["category"] in RESOURCE_CATEGORIES:
+            where.append("r.category=?"); params.append(filters["category"])
+        if filters["mode"] in (*PHYSICAL_MODES, *SKILL_MODES):
+            where.append("r.transfer_mode=?"); params.append(filters["mode"])
+        if filters["status"] in (*STATUS_LABELS, "all"):
+            if filters["status"] and filters["status"] != "all":
+                where.append("r.status=?"); params.append(filters["status"])
+        else:
+            filters["status"] = ""
+        order = "ASC" if filters["sort"] == "old" else "DESC"
+        db = get_db()
+        query = " FROM resources r JOIN users u ON u.id=r.owner_id WHERE " + " AND ".join(where)
+        items = db.execute("SELECT r.*,u.name owner_name,u.student_no" + query + f" ORDER BY r.created_at {order},r.id {order} LIMIT 20 OFFSET ?", (*params, (page - 1) * 20)).fetchall()
+        total = db.execute("SELECT COUNT(*)" + query, params).fetchone()[0]
+        return render_template("admin_resources.html", items=items, filters=filters, page=page, has_next=page * 20 < total, categories=RESOURCE_CATEGORIES)
+
+    @app.post("/admin/resources/bulk-withdraw")
+    @admin_required
+    def admin_resource_bulk_withdraw():
+        resource_ids = {int(item) for item in request.form.getlist("resource_ids") if item.isdigit()}
+        if not resource_ids:
+            abort(400, "请至少选择一项资源。")
+        for resource_id in resource_ids:
+            resource_withdraw(resource_id=resource_id)
+        flash(f"已下架 {len(resource_ids)} 项资源。", "success")
+        return redirect(url_for("admin_resources"))
+
+    @app.route("/admin/content")
+    @admin_required
+    def admin_content():
+        db = get_db()
+        return render_template("admin_content.html",
+            pending_posts=db.execute("SELECT p.*,u.name author_name FROM posts p JOIN users u ON u.id=p.author_id WHERE p.status='pending' ORDER BY p.created_at").fetchall(),
+            reports=db.execute("SELECT r.*,u.name reporter_name FROM reports r JOIN users u ON u.id=r.reporter_id WHERE r.status='open' ORDER BY r.created_at").fetchall(),
+            moderation_rules=db.execute("SELECT * FROM moderation_rules ORDER BY is_active DESC,severity,pattern").fetchall(),
+            lost_items=db.execute("SELECT lf.*,u.name owner_name FROM lost_found lf JOIN users u ON u.id=lf.user_id WHERE lf.status!='withdrawn' ORDER BY lf.created_at DESC LIMIT 50").fetchall())
+
+    @app.route("/admin/credit")
+    @admin_required
+    def admin_credit():
+        db = get_db()
+        return render_template("admin_credit.html",
+            credit_appeals=db.execute("SELECT ca.*,ce.delta,ce.reason event_reason,u.name user_name FROM credit_appeals ca JOIN credit_events ce ON ce.id=ca.event_id JOIN users u ON u.id=ca.user_id WHERE ca.status='pending' ORDER BY ca.created_at").fetchall(),
+            events=db.execute("SELECT ce.*,u.name user_name FROM credit_events ce JOIN users u ON u.id=ce.user_id ORDER BY ce.created_at DESC,id DESC LIMIT 50").fetchall(),
+            restrictions=db.execute("SELECT ar.*,u.name user_name FROM account_restrictions ar JOIN users u ON u.id=ar.user_id WHERE ar.is_active=1 AND ar.ends_at>CURRENT_TIMESTAMP ORDER BY ar.created_at DESC").fetchall())
+
+    @app.route("/admin/settings")
+    @admin_required
+    def admin_settings():
+        db = get_db()
+        return render_template("admin_settings.html", ai_config=_ai_config(db), backups=db.execute("SELECT b.*,u.name creator_name FROM backup_records b LEFT JOIN users u ON u.id=b.created_by ORDER BY b.created_at DESC,b.id DESC LIMIT 20").fetchall(), moderation_rules=db.execute("SELECT * FROM moderation_rules ORDER BY is_active DESC,severity,pattern").fetchall())
+
+    @app.route("/admin/audit")
+    @admin_required
+    def admin_audit():
+        page = max(request.args.get("page", 1, type=int), 1)
+        filters = {key: request.args.get(key, "").strip() for key in ("actor", "action", "target_type", "date_from", "date_to", "q")}
+        where, params = ["1=1"], []
+        for column, key in (("a.actor_id", "actor"), ("a.action", "action"), ("a.target_type", "target_type")):
+            if filters[key]: where.append(column + "=?"); params.append(filters[key])
+        if filters["date_from"]: where.append("DATE(a.created_at)>=?"); params.append(filters["date_from"])
+        if filters["date_to"]: where.append("DATE(a.created_at)<=?"); params.append(filters["date_to"])
+        if filters["q"]: where.append("(a.detail LIKE ? OR a.action LIKE ?)"); params.extend([f"%{filters['q']}%"] * 2)
+        db = get_db(); query = " FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id WHERE " + " AND ".join(where)
+        logs = db.execute("SELECT a.*,u.name actor_name" + query + " ORDER BY a.created_at DESC,a.id DESC LIMIT 30 OFFSET ?", (*params, (page - 1) * 30)).fetchall()
+        total = db.execute("SELECT COUNT(*)" + query, params).fetchone()[0]
+        return render_template("admin_audit.html", logs=logs, filters=filters, page=page, has_next=page * 30 < total, admins=db.execute("SELECT id,name FROM users WHERE role='admin' ORDER BY name").fetchall())
 
     @app.route("/admin/ai-config", methods=["GET", "POST"])
     @admin_required
@@ -1022,7 +1105,7 @@ def create_app(test_config=None) -> Flask:
         audit(db, g.user["id"], "ai_config_update", "ai_config", 1, "已更新 AI 搜索配置")
         db.commit()
         flash("AI 助手配置已保存。", "success")
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_settings"))
 
     @app.route("/api/admin/stats")
     @admin_required
@@ -1044,7 +1127,7 @@ def create_app(test_config=None) -> Flask:
         db.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
         db.commit()
         flash("用户角色已更新。", "success")
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/users/<int:user_id>/active")
     @admin_required
@@ -1058,7 +1141,7 @@ def create_app(test_config=None) -> Flask:
         db.execute("UPDATE users SET is_active=? WHERE id=?", (0 if user["is_active"] else 1, user_id))
         db.commit()
         flash("账号状态已更新。", "success")
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/users/<int:user_id>/reset-password")
     @admin_required
@@ -1075,7 +1158,7 @@ def create_app(test_config=None) -> Flask:
         )
         db.commit()
         flash("临时密码已设置。", "success")
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/users/<int:user_id>/edit")
     @admin_required
@@ -1099,7 +1182,7 @@ def create_app(test_config=None) -> Flask:
                 abort(409, "用户名或学号已存在。")
             raise
         flash("用户资料已更正。", "success")
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/users/<int:user_id>/credit")
     @admin_required
@@ -1119,7 +1202,7 @@ def create_app(test_config=None) -> Flask:
         if outcome["delta"] < 0:
             _notify(db, user_id, f"信用分 {outcome['delta']}：{reason}，可在 30 天内申诉。", url_for("profile", tab="credit"))
         db.commit()
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/credit-appeals/<int:appeal_id>/<action>")
     @admin_required
@@ -1144,7 +1227,7 @@ def create_app(test_config=None) -> Flask:
         audit(db, g.user["id"], f"credit_appeal_{action}", "credit_appeal", appeal_id, comment)
         _notify(db, appeal["user_id"], f"信用申诉已{'撤销原扣分' if action == 'revoke' else '维持原处理'}：{comment}", url_for("profile", tab="credit"))
         db.commit()
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_credit"))
 
     @app.post("/admin/reports/<int:report_id>/<action>")
     @admin_required
@@ -1176,7 +1259,7 @@ def create_app(test_config=None) -> Flask:
         audit(db, g.user["id"], f"report_{action}", report["target_type"], report["target_id"], resolution)
         _notify(db, report["reporter_id"], f"你的举报已处理：{resolution}", url_for("notifications"))
         db.commit()
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_content"))
 
     @app.post("/admin/posts/<int:post_id>/<action>")
     @admin_required
@@ -1192,7 +1275,7 @@ def create_app(test_config=None) -> Flask:
         audit(db, g.user["id"], f"post_{action}", "post", post_id)
         _notify(db, post["author_id"], "你的帖子审核状态已更新", url_for("community.post_detail", post_id=post_id) if status == "published" else url_for("community.list_posts"))
         db.commit()
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_content"))
 
     @app.post("/admin/users/<int:user_id>/restrict")
     @admin_required
@@ -1217,7 +1300,7 @@ def create_app(test_config=None) -> Flask:
         audit(db, g.user["id"], f"user_{kind}", "user", user_id, reason)
         _notify(db, user_id, f"账号受到{hours}小时限制：{reason}", url_for("rules"))
         db.commit()
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/users/<int:user_id>/restore")
     @admin_required
@@ -1230,7 +1313,7 @@ def create_app(test_config=None) -> Flask:
         )
         audit(db, g.user["id"], "user_restore", "user", user_id)
         db.commit()
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_user_detail", user_id=user_id))
 
     @app.post("/admin/backups")
     @admin_required
@@ -1245,7 +1328,7 @@ def create_app(test_config=None) -> Flask:
         audit(db, g.user["id"], "backup_create", "backup", detail=archive.name)
         db.commit()
         flash("备份已创建。", "success")
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_settings"))
 
     @app.get("/admin/backups/<path:filename>")
     @admin_required
@@ -1273,7 +1356,7 @@ def create_app(test_config=None) -> Flask:
         rule_id = db.execute("SELECT id FROM moderation_rules WHERE pattern=?", (pattern,)).fetchone()[0]
         audit(db, g.user["id"], "moderation_rule_add", "moderation_rule", rule_id, note)
         db.commit()
-        return redirect(url_for("admin"))
+        return redirect(url_for("admin_settings"))
 
     @app.errorhandler(400)
     @app.errorhandler(403)
@@ -1370,6 +1453,7 @@ def ai_enhance_results(query, results, config):
         )
         with urlopen(request_obj, timeout=5) as response:
             content = json.loads(response.read().decode("utf-8"))["choices"][0]["message"]["content"]
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
         reasons = {
             item["id"]: item["reason"].strip()[:300]
             for item in json.loads(content)

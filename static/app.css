@@ -539,3 +539,6 @@ input.field-error,select.field-error,textarea.field-error{border-color:var(--dan
 
 /* Local community dashboard: stack its three feeds. */
 .home-grid{display:flex;flex-direction:column;gap:30px}
+.admin-nav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 20px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.admin-nav a{padding:7px 10px;border-radius:4px;color:var(--muted);font-size:13px;font-weight:600}.admin-nav a.active,.admin-nav a:hover{background:var(--blue-light);color:var(--blue)}
+dialog{border:0;border-radius:var(--radius);box-shadow:0 12px 40px rgba(0,0,0,.25);max-width:420px;width:calc(100% - 32px);padding:24px}dialog::backdrop{background:rgba(0,0,0,.35)}.modal-close{float:right;border:0;background:none;font-size:20px;cursor:pointer}

@@ -1,5 +1,6 @@
 import io
 import base64
+import json
 import sqlite3
 import tempfile
 import threading
@@ -230,6 +231,42 @@ class CampusAppTest(unittest.TestCase):
             self.client.post("/api/ai/search", json={"query": "x" * 101}).status_code,
             400,
         )
+
+    def test_ai_search_accepts_markdown_wrapped_json(self):
+        self.register()
+        self.login()
+        self.publish_resource(name="Python 算法教材", description="适合算法课复习")
+        with self.db() as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.commit()
+        self.login()
+        self.client.post("/admin/ai-config", data={
+            "enabled": "on", "api_endpoint": "https://ai.example/v1/chat/completions",
+            "api_key": "secret", "model": "test-model", "system_prompt": "只返回 JSON。",
+            "max_results": "5",
+        })
+        response_body = json.dumps({"choices": [{"message": {"content": (
+            "```json\n[{\"id\": \"resource:1\", \"reason\": \"适合算法复习\"}]\n```"
+        )}}]}).encode()
+        with patch("app.urlopen") as urlopen_mock:
+            urlopen_mock.return_value.__enter__.return_value.read.return_value = response_body
+            response = self.client.post("/api/ai/search", json={"query": "算法教材"})
+        self.assertEqual(response.get_json()["mode"], "ai")
+        self.assertEqual(response.get_json()["results"][0]["reason"], "适合算法复习")
+
+    def test_lost_found_filters_by_occurred_date(self):
+        self.register()
+        self.login()
+        common = {"description": "测试物品", "location": "图书馆", "keywords": "测试"}
+        self.client.post("/lost-found/new/lost", data={
+            "title": "旧物品", "occurred_on": "2026-01-01", **common
+        })
+        self.client.post("/lost-found/new/found", data={
+            "title": "新物品", "occurred_on": "2026-02-01", **common
+        })
+        page = self.client.get("/lost-found?date_from=2026-02-01&date_to=2026-02-01").get_data(as_text=True)
+        self.assertIn("新物品", page)
+        self.assertNotIn("旧物品", page)
 
     def test_owner_can_edit_and_withdraw_resource_while_other_users_cannot(self):
         self.register()
@@ -485,6 +522,22 @@ class CampusAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         with self.db() as db:
             self.assertEqual(db.execute("SELECT role FROM users WHERE id=?", (alice_id,)).fetchone()[0], "admin")
+
+    def test_admin_modules_and_resource_bulk_withdraw(self):
+        self.register()
+        with self.db() as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.commit()
+        self.login()
+        self.publish_resource(name="待管理资源")
+        resource_id = self.resource_id("待管理资源")
+        for route in ("/admin", "/admin/users", "/admin/users/1", "/admin/resources", "/admin/content", "/admin/credit", "/admin/settings", "/admin/audit"):
+            self.assertEqual(self.client.get(route).status_code, 200)
+        page = self.client.get("/admin/resources?q=待管理&status=available").get_data(as_text=True)
+        self.assertIn("待管理资源", page)
+        self.assertEqual(self.client.post("/admin/resources/bulk-withdraw", data={"resource_ids": str(resource_id)}).status_code, 302)
+        with self.db() as db:
+            self.assertEqual(db.execute("SELECT status FROM resources WHERE id=?", (resource_id,)).fetchone()[0], "withdrawn")
 
     def test_student_cannot_call_admin_write_routes(self):
         self.register()

@@ -57,6 +57,7 @@
           <a href="{{ url_for('profile') }}" class="sidebar-link{% if request.endpoint == 'profile' %} active{% endif %}">个人中心</a>
         {% endif %}
       </div>
+      {% if g.user and g.user['role'] == 'admin' %}<div class="sidebar-section"><h3 class="sidebar-heading">管理后台</h3><a href="{{ url_for('admin') }}" class="sidebar-link{% if request.endpoint == 'admin' %} active{% endif %}">概览</a><a href="{{ url_for('admin_users') }}" class="sidebar-link{% if request.endpoint in ('admin_users', 'admin_user_detail') %} active{% endif %}">用户管理</a><a href="{{ url_for('admin_resources') }}" class="sidebar-link{% if request.endpoint == 'admin_resources' %} active{% endif %}">资源管理</a><a href="{{ url_for('admin_content') }}" class="sidebar-link{% if request.endpoint == 'admin_content' %} active{% endif %}">内容审核</a><a href="{{ url_for('admin_credit') }}" class="sidebar-link{% if request.endpoint == 'admin_credit' %} active{% endif %}">信用管理</a><a href="{{ url_for('admin_settings') }}" class="sidebar-link{% if request.endpoint == 'admin_settings' %} active{% endif %}">系统设置</a><a href="{{ url_for('admin_audit') }}" class="sidebar-link{% if request.endpoint == 'admin_audit' %} active{% endif %}">审计日志</a></div>{% endif %}
     </aside>
     <main class="main-area">
       {% if request.endpoint != 'index' %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="{{ url_for('index') }}">首页</a><span>›</span><span>{{ breadcrumb_label }}</span></nav>{% endif %}
