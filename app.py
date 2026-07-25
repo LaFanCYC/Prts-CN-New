@@ -82,7 +82,10 @@ def create_app(test_config=None) -> Flask:
     if os.name != "nt":
         data_dir.chmod(0o700)
     upload_dir = Path((test_config or {}).get("UPLOAD_FOLDER", data_dir / "uploads"))
-    upload_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        upload_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        pass
     if os.name != "nt":
         upload_dir.chmod(0o700)
     app.config.from_mapping(
