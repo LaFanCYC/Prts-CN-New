@@ -299,7 +299,8 @@ def create_app(test_config=None) -> Flask:
         trust = {"level": level, "score": score, "percent": min(int(score / next_at * 100), 100)}
         my_badges = [dict(b) for b in db.execute(
             "SELECT ub.*,bd.name,bd.description,bd.tier,bd.icon FROM user_badges ub JOIN badges bd ON bd.id=ub.badge_id WHERE ub.user_id=?", (g.user["id"],)).fetchall()]
-        return render_template("profile.html", stats=stats, trust=trust, my_badges=my_badges)
+        earned_ids = {b["badge_id"] for b in my_badges}
+        return render_template("profile.html", stats=stats, trust=trust, my_badges=my_badges, all_badges=BADGE_DEFINITIONS, earned_ids=earned_ids)
 
     @app.route("/resources")
     def resources():
