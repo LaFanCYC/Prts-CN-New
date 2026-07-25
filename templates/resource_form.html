@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block title %}{{ '编辑' if editing else '发布' }}资源 · 校园智享{% endblock %}
 {% block content %}
 <section class="panel"><h1>{{ '编辑' if editing else '发布' }}资源或技能服务</h1>{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
@@ -13,5 +13,5 @@
   <label>图片（可选，JPG/PNG/WebP，最大 5 MB）<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label>
   <button class="primary">{{ '保存修改' if editing else '发布' }}</button>
 </form></section>
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+
 {% endblock %}

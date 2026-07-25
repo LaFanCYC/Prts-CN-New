@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 import secrets
 import sqlite3
@@ -264,7 +264,13 @@ def create_app(test_config=None) -> Flask:
             db.commit()
             flash("个人资料已更新。", "success")
             return redirect(url_for("profile"))
-        return render_template("profile.html")
+        db = get_db()
+        stats = {
+            "resources": db.execute("SELECT COUNT(*) FROM resources WHERE owner_id=? AND status!='withdrawn'", (g.user["id"],)).fetchone()[0],
+            "applications": db.execute("SELECT COUNT(*) FROM applications WHERE applicant_id=?", (g.user["id"],)).fetchone()[0],
+            "completed": db.execute("SELECT COUNT(*) FROM applications WHERE applicant_id=? AND status IN ('returned','completed')", (g.user["id"],)).fetchone()[0],
+        }
+        return render_template("profile.html", stats=stats)
 
     @app.route("/resources")
     def resources():

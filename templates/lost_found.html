@@ -1,8 +1,55 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block title %}失物招领 · 校园智享{% endblock %}
 {% block content %}
-<div class="section-head"><div><p class="eyebrow blue">LOST & FOUND</p><h1>失物招领</h1></div>{% if g.user %}<div class="actions"><a class="button" href="{{ url_for('lost_found_new', kind='lost') }}">发布寻物</a><a class="button secondary" href="{{ url_for('lost_found_new', kind='found') }}">登记拾物</a></div>{% endif %}</div>
-<form class="filter panel compact" method="get"><input name="q" value="{{ filters.q }}" placeholder="搜索名称、描述、地点或关键词"><select name="kind"><option value="">全部类型</option><option value="lost" {{ 'selected' if filters.kind == 'lost' }}>寻物启事</option><option value="found" {{ 'selected' if filters.kind == 'found' }}>拾物登记</option></select><select name="status"><option value="">全部状态</option><option value="open" {{ 'selected' if filters.status == 'open' }}>未解决</option><option value="resolved" {{ 'selected' if filters.status == 'resolved' }}>已解决</option></select><button class="primary">筛选</button></form>
-<div class="cards">{% for item in items %}<a class="card resource-card" href="{{ url_for('lost_found_detail', item_id=item['id']) }}">{% if item['image_name'] %}<img src="{{ url_for('uploaded_file', filename=item['image_name']) }}" alt="{{ item['title'] }}">{% endif %}<div><span class="badge {{ item['kind'] }}">{{ '寻物' if item['kind']=='lost' else '拾物' }}</span><span class="status">{{ '未解决' if item['status']=='open' else '已解决' }}</span><h3>{{ item['title'] }}</h3><p>{{ item['location'] }} · {{ item['occurred_on'] }}</p><small>{{ item['owner_name'] }}</small></div></a>{% else %}<div class="empty panel">没有找到符合条件的信息。</div>{% endfor %}</div>
-<nav class="pagination">{% if page > 1 %}<a class="button secondary" href="{{ url_for('lost_found', page=page-1, **filters) }}">上一页</a>{% endif %}<span>第 {{ page }} 页</span>{% if has_next %}<a class="button secondary" href="{{ url_for('lost_found', page=page+1, **filters) }}">下一页</a>{% endif %}</nav>
+<div class="section-head">
+  <div>
+    <p class="eyebrow">LOST & FOUND</p>
+    <h1>失物招领</h1>
+  </div>
+  {% if g.user %}
+  <div class="actions">
+    <a class="btn btn-primary" href="{{ url_for('lost_found_new', kind='lost') }}">发布寻物</a>
+    <a class="btn btn-text" href="{{ url_for('lost_found_new', kind='found') }}">登记拾物</a>
+  </div>
+  {% endif %}
+</div>
+
+<form class="filter-bar" method="get">
+  <input name="q" value="{{ filters.q }}" placeholder="搜索名称、描述、地点或关键词">
+  <select name="kind"><option value="">全部类型</option><option value="lost" {{ 'selected' if filters.kind == 'lost' }}>寻物启事</option><option value="found" {{ 'selected' if filters.kind == 'found' }}>拾物登记</option></select>
+  <select name="status"><option value="">全部状态</option><option value="open" {{ 'selected' if filters.status == 'open' }}>未解决</option><option value="resolved" {{ 'selected' if filters.status == 'resolved' }}>已解决</option></select>
+  <button class="btn btn-primary">筛选</button>
+</form>
+
+{% if items %}
+<div class="cards resource-grid">
+{% for item in items %}
+  <a class="card resource-card" href="{{ url_for('lost_found_detail', item_id=item['id']) }}">
+    {% if item['image_name'] %}<img src="{{ url_for('uploaded_file', filename=item['image_name']) }}" alt="{{ item['title'] }}">{% endif %}
+    <div>
+      <span class="badge">{{ '寻物' if item['kind']=='lost' else '拾物' }}</span>
+      <span class="status">{{ '未解决' if item['status']=='open' else '已解决' }}</span>
+      <h3>{{ item['title'] }}</h3>
+      <p>{{ item['location'] }} · {{ item['occurred_on'] }}</p>
+      <small>{{ item['owner_name'] }}</small>
+    </div>
+  </a>
+{% endfor %}
+</div>
+{% else %}<div class="card"><div class="card-body empty">没有找到符合条件的信息。</div></div>{% endif %}
+
+<nav class="pagination">
+  {% if page > 1 %}<a class="btn btn-text" href="{{ url_for('lost_found', page=page-1, **filters) }}">上一页</a>{% endif %}
+  <span>第 {{ page }} 页</span>
+  {% if has_next %}<a class="btn btn-text" href="{{ url_for('lost_found', page=page+1, **filters) }}">下一页</a>{% endif %}
+</nav>
+{% endblock %}
+
+{% block sidebar %}
+<div class="sidebar-section">
+  <h3 class="sidebar-heading">失物招领</h3>
+  <a href="{{ url_for('lost_found') }}" class="sidebar-link active">全部信息</a>
+  <a href="?kind=lost" class="sidebar-link{% if filters.kind == 'lost' %} active{% endif %}">寻物启事</a>
+  <a href="?kind=found" class="sidebar-link{% if filters.kind == 'found' %} active{% endif %}">拾物登记</a>
+</div>
 {% endblock %}

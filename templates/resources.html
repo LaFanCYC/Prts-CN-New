@@ -1,22 +1,77 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block title %}资源大厅 · 校园智享{% endblock %}
 {% block content %}
-<div class="section-head"><div><p class="eyebrow blue">RESOURCE HUB</p><h1>资源大厅</h1></div>{% if g.user %}<a class="button" href="{{ url_for('resource_new') }}">发布资源</a>{% endif %}</div>
-<form class="filter panel" method="get">
+<div class="section-head">
+  <div>
+    <p class="eyebrow">RESOURCE HUB</p>
+    <h1>资源大厅</h1>
+  </div>
+  {% if g.user %}<a class="btn btn-primary" href="{{ url_for('resource_new') }}">发布资源</a>{% endif %}
+</div>
+
+<form class="filter-bar" method="get">
   <input name="q" value="{{ filters.q }}" placeholder="搜索名称、描述或关键词">
   <select name="category"><option value="">全部类别</option>{% for item in categories %}<option {{ 'selected' if filters.category == item }}>{{ item }}</option>{% endfor %}</select>
   <select name="transfer_mode"><option value="">全部方式</option>{% for value,label in mode_labels.items() %}<option value="{{ value }}" {{ 'selected' if filters.transfer_mode == value }}>{{ label }}</option>{% endfor %}</select>
   <select name="condition_level"><option value="">全部新旧程度</option>{% for item in conditions %}<option {{ 'selected' if filters.condition_level == item }}>{{ item }}</option>{% endfor %}<option {{ 'selected' if filters.condition_level == '不适用' }}>不适用</option></select>
   <select name="status"><option value="">全部状态</option>{% for value,label in status_labels.items() if value != 'withdrawn' %}<option value="{{ value }}" {{ 'selected' if filters.status == value }}>{{ label }}</option>{% endfor %}</select>
-  <button class="primary">筛选</button>
+  <button class="btn btn-primary">筛选</button>
 </form>
+
+{% if resources %}
 <div class="cards resource-grid">
 {% for resource in resources %}
   <a class="card resource-card" href="{{ url_for('resource_detail', resource_id=resource['id']) }}">
     {% if resource['image_name'] %}<img src="{{ url_for('uploaded_file', filename=resource['image_name']) }}" alt="{{ resource['name'] }}">{% endif %}
-    <div><span class="badge">{{ resource['category'] }}</span><span class="status">{{ status_labels[resource['status']] }}</span><h3>{{ resource['name'] }}</h3><p>{{ resource['description']|truncate(90) }}</p><small>{{ mode_labels[resource['transfer_mode']] }} · {{ resource['owner_name'] }}</small></div>
+    <div>
+      <span class="badge">{{ resource['category'] }}</span>
+      <span class="status">{{ status_labels[resource['status']] }}</span>
+      <h3>{{ resource['name'] }}</h3>
+      <p>{{ resource['description']|truncate(90) }}</p>
+      <small>{{ mode_labels[resource['transfer_mode']] }} · {{ resource['owner_name'] }}</small>
+    </div>
   </a>
-{% else %}<div class="empty panel">没有找到符合条件的资源。</div>{% endfor %}
+{% endfor %}
 </div>
-<nav class="pagination">{% if page > 1 %}<a class="button secondary" href="?{{ request.query_string.decode()|replace('page=' ~ page, 'page=' ~ (page-1)) }}">上一页</a>{% endif %}<span>第 {{ page }} 页</span>{% if has_next %}<a class="button secondary" href="{{ url_for('resources', page=page+1, **filters) }}">下一页</a>{% endif %}</nav>
+{% else %}
+<div class="card"><div class="card-body empty">没有找到符合条件的资源。</div></div>
+{% endif %}
+
+<nav class="pagination">
+  {% if page > 1 %}<a class="btn btn-text" href="?{{ request.query_string.decode()|replace('page=' ~ page, 'page=' ~ (page-1)) }}">上一页</a>{% endif %}
+  <span>第 {{ page }} 页</span>
+  {% if has_next %}<a class="btn btn-text" href="{{ url_for('resources', page=page+1, **filters) }}">下一页</a>{% endif %}
+</nav>
+{% endblock %}
+
+{% block sidebar %}
+<div class="sidebar-section">
+  <h3 class="sidebar-heading">资源分类</h3>
+  {% for item in categories %}
+    <a href="?category={{ item }}" class="sidebar-link{% if filters.category == item %} active{% endif %}">{{ item }}</a>
+  {% endfor %}
+</div>
+<div class="sidebar-section">
+  <h3 class="sidebar-heading">流转方式</h3>
+  {% for value,label in mode_labels.items() %}
+    <a href="?transfer_mode={{ value }}" class="sidebar-link{% if filters.transfer_mode == value %} active{% endif %}">{{ label }}</a>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block side_panel %}
+<div class="panel-card">
+  <h4>快速操作</h4>
+  {% if g.user %}
+    <a href="{{ url_for('resource_new') }}" class="btn btn-primary btn-block btn-sm">发布资源</a>
+  {% else %}
+    <a href="{{ url_for('login') }}" class="btn btn-primary btn-block btn-sm">登录后即可发布</a>
+  {% endif %}
+</div>
+{% if g.user and g.user['role'] == 'admin' %}
+<div class="panel-card">
+  <h4>管理员</h4>
+  <a href="{{ url_for('admin') }}" class="btn btn-text btn-block btn-sm">管理后台</a>
+</div>
+{% endif %}
 {% endblock %}

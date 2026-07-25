@@ -1,7 +1,85 @@
 {% extends 'base.html' %}
 {% block content %}
-<section class="hero"><p class="eyebrow">资源流转 · 技能互助 · 失物归还</p><h1>让校园里的每份资源，再多发挥一次价值</h1><p>发布闲置教材与器材，交换技能，也让失物更快回到主人身边。</p></section>
-<section><div class="section-head"><h2>最新资源</h2></div><div class="cards">
-{% for resource in resources %}<article class="card"><span class="badge">{{ resource['category'] }}</span><h3>{{ resource['name'] }}</h3><p>{{ resource['description']|truncate(80) }}</p><small>{{ resource['owner_name'] }}</small></article>{% else %}<div class="empty">还没有资源，登录后发布第一条吧。</div>{% endfor %}
-</div></section>
+<section class="hero">
+  <p class="eyebrow">资源流转 · 技能互助 · 失物归还</p>
+  <h1>让校园里的每份资源都再多发挥一次价值</h1>
+  <p class="hero-desc">发布闲置教材与器材，交换技能，也让失物更快回到主人身边。</p>
+</section>
+
+{% if g.user %}
+<section class="quick-post">
+  <div class="quick-post-header">
+    <span class="avatar">{{ g.user['name'][0] }}</span>
+    <span class="quick-post-title">发布一条资源或技能服务</span>
+    <a href="{{ url_for('resource_new') }}" class="btn btn-text btn-sm">完整表单 &rarr;</a>
+  </div>
+  <form method="post" action="{{ url_for('resource_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div style="display:grid;gap:10px">
+      <input name="name" maxlength="50" placeholder="资源名称（如：高等数学第七版）" required>
+      <div class="form-grid">
+        <select name="category" required>
+          <option value="">选择类别</option>
+          {% for cat in ('教材书籍','实验器材','电子设备','文体用品','学习资料','技能服务','其他') %}<option>{{ cat }}</option>{% endfor %}
+        </select>
+        <select name="transfer_mode" required>
+          <option value="">选择流转方式</option>
+          {% for value,label in mode_labels.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <textarea name="description" rows="3" maxlength="1000" placeholder="简单描述一下…" required></textarea>
+      <input type="hidden" name="condition_level" value="九成新">
+      <button class="btn btn-primary">快速发布</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section>
+  <div class="section-head">
+    <h2>最新资源</h2>
+    <a href="{{ url_for('resources') }}" class="btn btn-text btn-sm">查看全部 &rarr;</a>
+  </div>
+  <div class="discussion-list">
+    {% for resource in resources %}
+    <article class="discussion-item">
+      <div class="discussion-avatar">{{ resource['owner_name'][0] }}</div>
+      <div class="discussion-content">
+        <h3><a href="{{ url_for('resource_detail', resource_id=resource['id']) }}">{{ resource['name'] }}</a></h3>
+        <div class="discussion-meta">
+          <span class="tag tag-blue">{{ resource['category'] }}</span>
+          <span>{{ resource['description']|truncate(60) }}</span>
+          <span>{{ resource['owner_name'] }}</span>
+        </div>
+      </div>
+      <div class="discussion-stats">
+        <span class="status-badge status-avail">{{ status_labels[resource['status']] }}</span>
+      </div>
+    </article>
+    {% else %}
+    <div class="card"><div class="card-body empty">还没有资源，登录后发布第一条吧。</div></div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block side_panel %}
+<div class="panel-card">
+  <h4>快速操作</h4>
+  {% if g.user %}
+    <p style="margin:0 0 8px;font-size:13px">{{ g.user['name'] }} · {{ g.user['grade'] }} · {{ g.user['class_name'] }}</p>
+    <a href="{{ url_for('resource_new') }}" class="btn btn-primary btn-block btn-sm" style="margin-bottom:6px">发布资源</a>
+    <a href="{{ url_for('lost_found_new', kind='lost') }}" class="btn btn-text btn-block btn-sm">发布寻物信息</a>
+  {% else %}
+    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">登录后即可发布资源和进行物品流转</p>
+    <a href="{{ url_for('login') }}" class="btn btn-primary btn-block btn-sm" style="margin-bottom:6px">登录</a>
+    <a href="{{ url_for('register') }}" class="btn btn-text btn-block btn-sm">注册新账号</a>
+  {% endif %}
+</div>
+{% if g.user %}
+<div class="panel-card">
+  <h4>关于校园智享</h4>
+  <p style="font-size:12px;color:var(--muted);margin:0">一个校内资源互助流转平台，让闲置的教材、器材和技能流动起来。</p>
+</div>
+{% endif %}
 {% endblock %}

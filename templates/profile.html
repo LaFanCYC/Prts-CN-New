@@ -1,17 +1,65 @@
 {% extends 'base.html' %}
-{% block title %}个人中心 · 校园智享{% endblock %}
+{% block title %}个人中心 · {{ g.user['name'] }} · 校园智享{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>个人中心</h1>
+<div class="profile-banner">
+  <div class="profile-avatar">{{ g.user['name'][0] }}</div>
+  <div class="profile-info">
+    <h2>{{ g.user['name'] }}</h2>
+    <div class="meta">
+      {{ g.user['grade'] }} · {{ g.user['class_name'] }} · {{ g.user['student_no'] }}
+      {% if g.user['role'] == 'admin' %}<span class="tag tag-blue" style="margin-left:8px">管理员</span>{% endif %}
+    </div>
+    <div class="profile-stats">
+      <div><strong>{{ stats.resources }}</strong><span>我的资源</span></div>
+      <div><strong>{{ stats.applications }}</strong><span>流转申请</span></div>
+      <div><strong>{{ stats.completed }}</strong><span>已完成</span></div>
+    </div>
+  </div>
+</div>
+
+<nav class="tabs" role="tablist">
+  <button class="tab-btn active" data-tab="edit" role="tab" aria-selected="true">编辑资料</button>
+  <button class="tab-btn" data-tab="resources" role="tab" aria-selected="false">我的资源</button>
+  <button class="tab-btn" data-tab="applications" role="tab" aria-selected="false">我的申请</button>
+</nav>
+
+<div class="tab-content active" id="tab-edit" role="tabpanel">
   {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <div class="card"><div class="card-body">
   <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="form-grid"><label>用户名<input value="{{ g.user['username'] }}" disabled></label><label>学号<input value="{{ g.user['student_no'] }}" disabled></label></div>
     <div class="form-grid"><label>姓名<input name="name" maxlength="50" value="{{ g.user['name'] }}" required></label><label>联系方式<input name="contact" maxlength="100" value="{{ g.user['contact'] }}"></label></div>
     <div class="form-grid"><label>年级<input name="grade" value="{{ g.user['grade'] }}" required></label><label>班级<input name="class_name" value="{{ g.user['class_name'] }}" required></label></div>
-    <h2>修改密码（可选）</h2>
+    <hr style="border:0;border-top:1px solid var(--line);margin:4px 0">
+    <h3 style="font-size:15px;margin:0">修改密码（可选）</h3>
     <div class="form-grid"><label>新密码<input type="password" minlength="8" name="new_password"></label><label>确认新密码<input type="password" minlength="8" name="password_confirm"></label></div>
-    <button class="primary">保存</button>
+    <button class="btn btn-primary">保存资料</button>
   </form>
-</section>
+  </div></div>
+</div>
+
+<div class="tab-content" id="tab-resources" role="tabpanel">
+  <div class="card"><div class="card-body" style="text-align:center;padding:40px">
+    <p style="color:var(--muted);font-size:14px">查看和管理你发布的所有资源共享与技能服务。</p>
+    <a href="{{ url_for('resources') }}" class="btn btn-primary btn-sm">前往资源大厅</a>
+  </div></div>
+</div>
+
+<div class="tab-content" id="tab-applications" role="tabpanel">
+  <div class="card"><div class="card-body" style="text-align:center;padding:40px">
+    <p style="color:var(--muted);font-size:14px">查看你发起和收到的所有流转申请记录。</p>
+    <a href="{{ url_for('applications') }}" class="btn btn-primary btn-sm">前往流转记录</a>
+  </div></div>
+</div>
+{% endblock %}
+
+{% block sidebar %}
+<div class="sidebar-section">
+  <h3 class="sidebar-heading">个人中心</h3>
+  <a href="{{ url_for('profile') }}" class="sidebar-link active">编辑资料</a>
+  <a href="{{ url_for('resources') }}" class="sidebar-link">我的资源</a>
+  <a href="{{ url_for('applications') }}" class="sidebar-link">我的申请</a>
+  <a href="{{ url_for('notifications') }}" class="sidebar-link">通知中心</a>
+</div>
 {% endblock %}
