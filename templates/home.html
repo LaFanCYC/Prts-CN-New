@@ -6,6 +6,22 @@
   <p class="hero-desc">发布闲置教材与器材，交换技能，也让失物更快回到主人身边。</p>
 </section>
 
+{% if category_counts %}
+<section class="category-boxes">
+  {% for row in category_counts %}
+  <a class="category-box" href="{{ url_for('resources', category=row['category']) }}">
+    <div class="category-box-icon" style="background:{{ ['#4f6f8f','#3a8','#8e6f4f','#6f4f8e','#4f8e6f','#8e4f6f','#6f8e4f'][loop.index0 % 7] }}">
+      {{ {'教材书籍':'📚','实验器材':'🔬','电子设备':'💻','文体用品':'⚽','学习资料':'📝','技能服务':'🔧','其他':'📦'}[row['category']] }}
+    </div>
+    <div class="category-box-info">
+      <strong>{{ row['category'] }}</strong>
+      <span>{{ row['cnt'] }} 项资源</span>
+    </div>
+  </a>
+  {% endfor %}
+</section>
+{% endif %}
+
 {% if g.user %}
 <section class="quick-post">
   <div class="quick-post-header">

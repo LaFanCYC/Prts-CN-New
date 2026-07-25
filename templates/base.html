@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
@@ -18,6 +18,7 @@
       <a href="{{ url_for('index') }}" class="nav-link{% if request.endpoint == 'index' %} active{% endif %}">首页</a>
       <a href="{{ url_for('resources') }}" class="nav-link{% if request.endpoint == 'resources' %} active{% endif %}">资源大厅</a>
       <a href="{{ url_for('lost_found') }}" class="nav-link{% if request.endpoint == 'lost_found' %} active{% endif %}">失物招领</a>
+      <a href="{{ url_for('badges') }}" class="nav-link{% if request.endpoint == 'badges' %} active{% endif %}">徽章</a>
       {% if g.user %}
         <a href="{{ url_for('applications') }}" class="nav-link{% if request.endpoint == 'applications' %} active{% endif %}">流转记录</a>
       {% endif %}

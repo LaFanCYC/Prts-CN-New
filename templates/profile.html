@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block title %}个人中心 · {{ g.user['name'] }} · 校园智享{% endblock %}
 {% block content %}
 <div class="profile-banner">
@@ -14,16 +14,48 @@
       <div><strong>{{ stats.applications }}</strong><span>流转申请</span></div>
       <div><strong>{{ stats.completed }}</strong><span>已完成</span></div>
     </div>
+    <div class="trust-bar-wrap" title="{{ trust.level }} · {{ trust.score }} 分">
+      <div class="trust-label">{{ trust.level }}</div>
+      <div class="trust-bar"><div class="trust-bar-fill" style="width:{{ trust.percent }}%"></div></div>
+      <span class="trust-score">{{ trust.score }} 分</span>
+    </div>
   </div>
 </div>
 
 <nav class="tabs" role="tablist">
-  <button class="tab-btn active" data-tab="edit" role="tab" aria-selected="true">编辑资料</button>
+  <button class="tab-btn active" data-tab="badges" role="tab" aria-selected="true">我的徽章
+    {% if my_badges %}<span class="badge-dot-inline">{{ my_badges|length }}</span>{% endif %}
+  </button>
+  <button class="tab-btn" data-tab="edit" role="tab" aria-selected="false">编辑资料</button>
   <button class="tab-btn" data-tab="resources" role="tab" aria-selected="false">我的资源</button>
   <button class="tab-btn" data-tab="applications" role="tab" aria-selected="false">我的申请</button>
 </nav>
 
-<div class="tab-content active" id="tab-edit" role="tabpanel">
+<div class="tab-content active" id="tab-badges" role="tabpanel">
+  <div class="card"><div class="card-body">
+  {% if my_badges %}
+  <div class="badge-grid profile-badges">
+  {% for b in my_badges %}
+    <div class="badge-card earned" style="border-left:4px solid {{ b.tier_color }}">
+      <div class="badge-icon" style="background:{{ b.tier_color }}20;color:{{ b.tier_color }};border-color:{{ b.tier_color }}40">{{ b.icon }}</div>
+      <div class="badge-info">
+        <h4>{{ b.name }}<span class="badge-tier {{ b.tier }}">{{ {'bronze':'铜','silver':'银','gold':'金'}[b.tier] }}</span></h4>
+        <p>{{ b.description }}</p>
+        <small>获得于 {{ b.granted_at }}</small>
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">还没有获得徽章。发布资源、完成流转即可解锁成就！</div>
+  {% endif %}
+  <div style="margin-top:16px;text-align:center">
+    <a href="{{ url_for('badges') }}" class="btn btn-text btn-sm">查看全部徽章 &rarr;</a>
+  </div>
+  </div></div>
+</div>
+
+<div class="tab-content" id="tab-edit" role="tabpanel">
   {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
   <div class="card"><div class="card-body">
   <form method="post">
@@ -57,9 +89,10 @@
 {% block sidebar %}
 <div class="sidebar-section">
   <h3 class="sidebar-heading">个人中心</h3>
-  <a href="{{ url_for('profile') }}" class="sidebar-link active">编辑资料</a>
+  <a href="{{ url_for('profile') }}" class="sidebar-link active">我的徽章</a>
   <a href="{{ url_for('resources') }}" class="sidebar-link">我的资源</a>
   <a href="{{ url_for('applications') }}" class="sidebar-link">我的申请</a>
   <a href="{{ url_for('notifications') }}" class="sidebar-link">通知中心</a>
+  <a href="{{ url_for('badges') }}" class="sidebar-link">徽章墙</a>
 </div>
 {% endblock %}

@@ -1,4 +1,4 @@
-PRAGMA foreign_keys = ON;
+﻿PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,3 +87,21 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS resources_search ON resources(status, category, transfer_mode);
 CREATE INDEX IF NOT EXISTS lost_found_search ON lost_found(kind, status, created_at);
 CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, is_read, created_at);
+
+CREATE TABLE IF NOT EXISTS badges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    tier TEXT NOT NULL CHECK (tier IN ('bronze', 'silver', 'gold')),
+    icon TEXT NOT NULL DEFAULT '★',
+    grantable_by TEXT NOT NULL DEFAULT 'system' CHECK (grantable_by IN ('system', 'admin')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_badges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    badge_id INTEGER NOT NULL REFERENCES badges(id),
+    granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, badge_id)
+);

@@ -44,8 +44,27 @@ STATUS_LABELS = {
 APPLICATION_STATUS_LABELS = {
     "pending": "待审批", "borrowed": "借用中", "return_pending": "待确认归还",
     "returned": "已归还", "rejected": "已拒绝", "completed": "已完成",
-    "in_service": "服务进行中", "completion_pending": "待确认完成", "withdrawn": "已撤销",
-}
+    "in_service": "服务进行中", "completion_pending": "待确认完成", }
+BADGE_TIERS = ("bronze", "silver", "gold")
+BADGE_TIER_COLORS = {"bronze": "#cd7f32", "silver": "#8a99a5", "gold": "#daa520"}
+BADGE_DEFINITIONS = [
+    {"id": 1, "name": "初次分享", "description": "发布第一条资源或技能服务", "tier": "bronze", "icon": "📦"},
+    {"id": 2, "name": "热心互助", "description": "完成第一次流转申请", "tier": "bronze", "icon": "🤝"},
+    {"id": 3, "name": "火眼金睛", "description": "发布并解决第一条失物招领", "tier": "bronze", "icon": "🔍"},
+    {"id": 4, "name": "靠谱发布者", "description": "累计完成5次以上资源流转", "tier": "silver", "icon": "⭐"},
+    {"id": 5, "name": "寻物达人", "description": "解决3条以上失物招领", "tier": "silver", "icon": "🏆"},
+    {"id": 6, "name": "流转达人", "description": "累计完成10次以上流转", "tier": "gold", "icon": "🏅"},
+    {"id": 7, "name": "诚信之星", "description": "出借归还率100%且满5次", "tier": "gold", "icon": "💎"},
+]
+BADGE_BY_ID = {b["id"]: b for b in BADGE_DEFINITIONS}
+def _seed_badges(db):
+    for badge in BADGE_DEFINITIONS:
+        db.execute(
+            "INSERT OR IGNORE INTO badges(id,name,description,tier,icon) VALUES(?,?,?,?,?)",
+            (badge["id"], badge["name"], badge["description"], badge["tier"], badge["icon"]),
+        )
+    db.commit()
+
 
 
 def _secret_key(data_dir: Path) -> str:
@@ -172,7 +191,8 @@ def create_app(test_config=None) -> Flask:
             "SELECT r.*, u.name owner_name FROM resources r JOIN users u ON u.id = r.owner_id "
             "WHERE r.status != 'withdrawn' ORDER BY r.created_at DESC LIMIT 6"
         ).fetchall()
-        return render_template("home.html", resources=resources)
+        categories = get_db().execute("SELECT category,COUNT(*) cnt FROM resources WHERE status!='withdrawn' GROUP BY category ORDER BY cnt DESC").fetchall()
+        return render_template("home.html", resources=resources, category_counts=categories)
 
     @app.route("/register", methods=("GET", "POST"))
     def register():
@@ -270,7 +290,16 @@ def create_app(test_config=None) -> Flask:
             "applications": db.execute("SELECT COUNT(*) FROM applications WHERE applicant_id=?", (g.user["id"],)).fetchone()[0],
             "completed": db.execute("SELECT COUNT(*) FROM applications WHERE applicant_id=? AND status IN ('returned','completed')", (g.user["id"],)).fetchone()[0],
         }
-        return render_template("profile.html", stats=stats)
+        score = stats["resources"] * 2 + stats["completed"] * 3 + stats["applications"]
+        if score >= 50: level, next_at = "核心贡献者", 50
+        elif score >= 30: level, next_at = "可信用户", 50
+        elif score >= 15: level, next_at = "活跃成员", 30
+        elif score >= 5: level, next_at = "普通用户", 15
+        else: level, next_at = "新用户", 5
+        trust = {"level": level, "score": score, "percent": min(int(score / next_at * 100), 100)}
+        my_badges = [dict(b) for b in db.execute(
+            "SELECT ub.*,bd.name,bd.description,bd.tier,bd.icon FROM user_badges ub JOIN badges bd ON bd.id=ub.badge_id WHERE ub.user_id=?", (g.user["id"],)).fetchall()]
+        return render_template("profile.html", stats=stats, trust=trust, my_badges=my_badges)
 
     @app.route("/resources")
     def resources():
@@ -905,6 +934,16 @@ def create_app(test_config=None) -> Flask:
     def friendly_error(error):
         return render_template("error.html", error=error), error.code
 
+    @app.route("/badges")
+    def badges():
+        db = get_db()
+        all_badges = [dict(b) for b in db.execute("SELECT * FROM badges ORDER BY tier,id").fetchall()]
+        user_badge_map = {}
+        for ub in db.execute("SELECT ub.*,u.name FROM user_badges ub JOIN users u ON u.id=ub.user_id ORDER BY ub.granted_at DESC").fetchall():
+            row = dict(ub)
+            user_badge_map.setdefault(row["badge_id"], []).append(row)
+        return render_template("badges.html", badges=all_badges, user_badge_map=user_badge_map, BADGE_TIER_COLORS=BADGE_TIER_COLORS)
+
     return app
 
 
@@ -991,6 +1030,39 @@ def _check_overdue(user_id):
         )
     if rows:
         db.commit()
+
+def _check_and_award_badges(db, user_id):
+    """Auto-award badges based on user activity."""
+    awarded = []
+    def grant(badge_id):
+        cur = db.execute("INSERT OR IGNORE INTO user_badges(user_id,badge_id) VALUES(?,?)", (user_id, badge_id))
+        if cur.rowcount:
+            awarded.append(BADGE_BY_ID[badge_id]["name"])
+    # Bronze: first resource
+    count = db.execute("SELECT COUNT(*) FROM resources WHERE owner_id=? AND status!='withdrawn'", (user_id,)).fetchone()[0]
+    if count >= 1: grant(1)
+    # Bronze: first completed application as applicant
+    count = db.execute("SELECT COUNT(*) FROM applications WHERE applicant_id=? AND status IN ('returned','completed')", (user_id,)).fetchone()[0]
+    if count >= 1: grant(2)
+    # Bronze: first lost & found resolved
+    count = db.execute("SELECT COUNT(*) FROM lost_found WHERE user_id=? AND status='resolved'", (user_id,)).fetchone()[0]
+    if count >= 1: grant(3)
+    # Silver: 5+ completed resources as owner
+    count = db.execute("SELECT COUNT(*) FROM resources WHERE owner_id=? AND status IN ('completed','in_use','in_service')", (user_id,)).fetchone()[0]
+    if count >= 5: grant(4)
+    # Silver: 3+ lost & found resolved
+    lf_count = db.execute("SELECT COUNT(*) FROM lost_found WHERE user_id=? AND status='resolved'", (user_id,)).fetchone()[0]
+    if lf_count >= 3: grant(5)
+    # Gold: 10+ completed applications
+    if count >= 10: grant(6)
+    # Gold: 100% return rate with 5+ borrows as owner
+    total = db.execute("SELECT COUNT(*) FROM applications WHERE resource_id IN (SELECT id FROM resources WHERE owner_id=?) AND status!='withdrawn'", (user_id,)).fetchone()[0]
+    on_time = db.execute("SELECT COUNT(*) FROM applications WHERE resource_id IN (SELECT id FROM resources WHERE owner_id=?) AND status='returned' AND expected_return_date >= date(completed_at,'+0 days')", (user_id,)).fetchone()[0]
+    if total >= 5 and on_time == total: grant(7)
+    if awarded:
+        db.commit()
+    return awarded
+
 
 
 def _lost_found_form_data(form):
