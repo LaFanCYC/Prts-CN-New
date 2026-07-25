@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}{{ '编辑' if editing else '发布' }}资源 · 校园智享{% endblock %}
+{% block content %}
+<section class="panel"><h1>{{ '编辑' if editing else '发布' }}资源或技能服务</h1>{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+<form method="post" enctype="multipart/form-data" data-resource-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>名称<input name="name" maxlength="50" value="{{ resource['name'] if resource else '' }}" required></label>
+  <div class="form-grid"><label>类别<select name="category" data-category required>{% for item in categories %}<option {{ 'selected' if resource and resource['category'] == item }}>{{ item }}</option>{% endfor %}</select></label>
+  <label>新旧程度<select name="condition_level" data-condition>{% for item in conditions %}<option {{ 'selected' if resource and resource['condition_level'] == item }}>{{ item }}</option>{% endfor %}<option value="不适用">不适用</option></select></label></div>
+  <label>流转方式<select name="transfer_mode" data-mode required>{% for value,label in mode_labels.items() %}<option value="{{ value }}" {{ 'selected' if resource and resource['transfer_mode'] == value }}>{{ label }}</option>{% endfor %}</select></label>
+  <label>描述<textarea name="description" rows="6" maxlength="1000" required>{{ resource['description'] if resource else '' }}</textarea></label>
+  <label>关键词<input name="keywords" maxlength="200" value="{{ resource['keywords'] if resource else '' }}" placeholder="例如：Python,教材"></label>
+  <label>图片（可选，JPG/PNG/WebP，最大 5 MB）<input type="file" name="image" accept="image/jpeg,image/png,image/webp"></label>
+  <button class="primary">{{ '保存修改' if editing else '发布' }}</button>
+</form></section>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

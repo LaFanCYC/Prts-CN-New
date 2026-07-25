@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+instance/
+app.db
+secret.key
+uploads/
+.coverage

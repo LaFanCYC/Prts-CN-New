@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}校园智享{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='logo.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt=""><span>校园智享</span>
+    </a>
+    <nav aria-label="主导航">
+      <a href="{{ url_for('index') }}">首页</a>
+      <a href="{{ url_for('resources') }}">资源大厅</a>
+      <a href="{{ url_for('lost_found') }}">失物招领</a>
+      {% if g.user %}
+        <a href="{{ url_for('applications') }}">流转记录</a>
+        <a href="{{ url_for('notifications') }}">通知{% if unread_count %}<span class="count">{{ unread_count }}</span>{% endif %}</a>
+        <a href="{{ url_for('profile') }}">个人中心</a>
+        {% if g.user['role'] == 'admin' %}<a href="{{ url_for('admin') }}">管理后台</a>{% endif %}
+        <form class="inline" method="post" action="{{ url_for('logout') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link-button">退出</button>
+        </form>
+      {% else %}
+        <a href="{{ url_for('login') }}">登录</a><a href="{{ url_for('register') }}">注册</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main class="container">
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

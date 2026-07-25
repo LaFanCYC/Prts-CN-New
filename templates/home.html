@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero"><p class="eyebrow">资源流转 · 技能互助 · 失物归还</p><h1>让校园里的每份资源，再多发挥一次价值</h1><p>发布闲置教材与器材，交换技能，也让失物更快回到主人身边。</p></section>
+<section><div class="section-head"><h2>最新资源</h2></div><div class="cards">
+{% for resource in resources %}<article class="card"><span class="badge">{{ resource['category'] }}</span><h3>{{ resource['name'] }}</h3><p>{{ resource['description']|truncate(80) }}</p><small>{{ resource['owner_name'] }}</small></article>{% else %}<div class="empty">还没有资源，登录后发布第一条吧。</div>{% endfor %}
+</div></section>
+{% endblock %}
