@@ -333,7 +333,7 @@ tr:last-child td{border-bottom:0}
 .list{display:flex;flex-direction:column;gap:12px}
 
 /* === Overlay for mobile sidebar === */
-.sidebar-overlay{display:none}
+.sidebar-overlay{display:none;opacity:0;transition:opacity .25s}
 
 /* === Responsive === */
 @media(max-width:1100px){
@@ -349,7 +349,7 @@ tr:last-child td{border-bottom:0}
     transition:transform .25s;box-shadow:var(--shadow-md);padding:16px;
   }
   .sidebar.open{transform:translateX(0)}
-  .sidebar-overlay{display:block;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:89}
+  .sidebar-overlay{display:block;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:89;opacity:1}
   .detail{grid-template-columns:1fr}
   .two-columns,.form-grid{grid-template-columns:1fr}
   .stats-grid{grid-template-columns:repeat(2,1fr)}
@@ -492,3 +492,12 @@ details summary{margin-bottom:12px;font-size:13px;color:var(--muted);cursor:poin
 .breadcrumb a{color:var(--muted);text-decoration:none}
 .breadcrumb a:hover{color:var(--blue);text-decoration:underline}
 .breadcrumb span{opacity:.5}
+/* === Empty states === */
+.empty-state{text-align:center;padding:40px 20px}
+.empty-icon{font-size:40px;margin-bottom:12px}
+.empty-state h3{font-size:16px;font-weight:700;color:var(--ink);margin:0 0 6px}
+.empty-state p{font-size:13px;color:var(--muted);margin:0 0 16px}
+
+/* === Inline form validation === */
+input.field-error,select.field-error,textarea.field-error{border-color:var(--danger);box-shadow:0 0 0 3px rgba(221,51,68,.1)}
+.field-error-msg{font-size:11px;color:var(--danger);margin-top:2px}
