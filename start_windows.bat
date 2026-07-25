@@ -13,5 +13,7 @@ if not defined CAMPUS_PORT set "CAMPUS_PORT=5000"
 set "CAMPUS_URL=http://%CAMPUS_HOST%:%CAMPUS_PORT%"
 
 echo CampusSmartFlow starting at %CAMPUS_URL%
+start "" "%CAMPUS_URL%"
 ".venv\Scripts\python.exe" -m waitress --host=%CAMPUS_HOST% --port=%CAMPUS_PORT% --call app:create_app
+if errorlevel 1 pause
 endlocal
