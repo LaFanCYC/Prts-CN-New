@@ -26,6 +26,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from community import create_community_blueprint
 from db import default_data_dir, get_db, init_app as init_db_app, init_db
 
 
@@ -91,6 +92,10 @@ def create_app(test_config=None) -> Flask:
     init_db_app(app)
     with app.app_context():
         init_db()
+
+    app.register_blueprint(
+        create_community_blueprint(login_required, save_image, _notify)
+    )
 
     @app.before_request
     def load_user_and_check_csrf():

@@ -67,6 +67,16 @@ class CampusAppTest(unittest.TestCase):
         data.update(overrides)
         return self.client.post("/resources/new", data=data)
 
+    def publish_post(self, **overrides):
+        data = {
+            "title": "Python 学习小组招募",
+            "section": "study",
+            "body": "每周三一起复习基础知识。",
+            "tags": " Python, 学习,python ",
+        }
+        data.update(overrides)
+        return self.client.post("/community/new", data=data)
+
     def switch_user(self, username, student_no):
         self.client.post("/logout")
         self.register(username=username, student_no=student_no)
@@ -647,6 +657,61 @@ class CampusAppTest(unittest.TestCase):
                 ).fetchall()
             }
         self.assertTrue(expected <= actual, expected - actual)
+
+    def test_post_publish_normalizes_tags_and_enforces_ownership(self):
+        self.register()
+        self.login()
+        response = self.publish_post()
+        self.assertEqual(response.status_code, 302)
+
+        with self.db() as db:
+            post = db.execute("SELECT * FROM posts").fetchone()
+            tags = {
+                row[0]
+                for row in db.execute(
+                    "SELECT t.name FROM tags t JOIN post_tags pt ON pt.tag_id=t.id "
+                    "WHERE pt.post_id=?",
+                    (post["id"],),
+                ).fetchall()
+            }
+        self.assertEqual(post["status"], "published")
+        self.assertEqual(tags, {"python", "学习"})
+        self.assertIn("Python 学习小组招募", self.client.get("/community").get_data(as_text=True))
+
+        self.switch_user("bob", "S002")
+        self.assertEqual(
+            self.client.post(
+                f"/community/{post['id']}/edit",
+                data={"title": "篡改", "section": "campus", "body": "无权限", "tags": "测试"},
+            ).status_code,
+            403,
+        )
+
+    def test_following_feed_and_repost_reference_original_post(self):
+        self.register()
+        self.login()
+        response = self.publish_post()
+        self.assertEqual(response.status_code, 302)
+        with self.db() as db:
+            alice_id = db.execute("SELECT id FROM users WHERE username='alice'").fetchone()[0]
+            post_id = db.execute("SELECT id FROM posts").fetchone()[0]
+
+        self.switch_user("bob", "S002")
+        self.assertEqual(
+            self.client.post(f"/community/users/{alice_id}/follow").status_code, 302
+        )
+        following = self.client.get("/community/following").get_data(as_text=True)
+        self.assertIn("Python 学习小组招募", following)
+
+        self.assertEqual(
+            self.client.post(
+                f"/community/{post_id}/repost", data={"comment": "推荐给正在入门的同学"}
+            ).status_code,
+            302,
+        )
+        with self.db() as db:
+            repost = db.execute("SELECT post_id,comment FROM reposts").fetchone()
+        self.assertEqual(tuple(repost), (post_id, "推荐给正在入门的同学"))
 
 
 if __name__ == "__main__":

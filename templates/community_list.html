@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}校园社区 · 校园智享{% endblock %}
+{% block content %}
+<div class="section-head"><div><p class="eyebrow blue">校园社区</p><h1>交流与互助</h1></div>{% if g.user %}<div class="actions"><a class="secondary button" href="{{ url_for('community.following') }}">我的关注</a><a class="button" href="{{ url_for('community.new_post') }}">发布帖子</a></div>{% endif %}</div>
+<nav class="pagination" aria-label="社区分区"><a href="{{ url_for('community.list_posts') }}">全部</a>{% for key,label in sections.items() %}<a href="{{ url_for('community.list_posts', section=key) }}">{{ label }}</a>{% endfor %}</nav>
+<div class="list">{% for post in posts %}<article class="panel"><span class="badge">{{ sections[post['section']] }}</span><h2><a href="{{ url_for('community.post_detail', post_id=post['id']) }}">{{ post['title'] }}</a></h2><p>{{ post['body']|truncate(160) }}</p><small>{{ post['author_name'] }} · {{ post['created_at'] }}</small></article>{% else %}<p class="empty">暂无帖子</p>{% endfor %}</div>
+{% endblock %}
