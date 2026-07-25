@@ -501,3 +501,21 @@ details summary{margin-bottom:12px;font-size:13px;color:var(--muted);cursor:poin
 /* === Inline form validation === */
 input.field-error,select.field-error,textarea.field-error{border-color:var(--danger);box-shadow:0 0 0 3px rgba(221,51,68,.1)}
 .field-error-msg{font-size:11px;color:var(--danger);margin-top:2px}
+
+/* === Community Guidelines === */
+.guidelines-list{display:flex;flex-direction:column;gap:20px}
+.guideline-item{display:flex;gap:16px}
+.guideline-num{width:32px;height:32px;border-radius:50%;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0;margin-top:2px}
+.guideline-content h3{font-size:15px;font-weight:700;margin:0 0 4px;color:var(--ink)}
+.guideline-content p{font-size:13px;color:var(--muted);margin:0}
+.guidelines-footer{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
+.guidelines-footer h3{font-size:15px;font-weight:700;margin:0 0 6px}
+.guidelines-footer p{font-size:13px;color:var(--muted);margin:0}
+
+/* === FAQ / Help Center === */
+.faq-section{margin-bottom:24px}
+.faq-heading{font-size:15px;font-weight:700;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.faq-item{border:1px solid var(--line);border-radius:var(--radius);margin-bottom:8px;overflow:hidden}
+.faq-item summary{padding:12px 16px;font-size:14px;font-weight:600;cursor:pointer;background:var(--bg);transition:background .15s}
+.faq-item summary:hover{background:var(--blue-light)}
+.faq-item p{padding:12px 16px;margin:0;font-size:13px;color:var(--muted);line-height:1.7}

@@ -1,0 +1,73 @@
+﻿{% extends 'base.html' %}
+{% block title %}帮助中心 · 校园智享{% endblock %}
+{% block breadcrumb %}<nav class="breadcrumb" aria-label="面包屑导航"><a href="/">首页</a><span>/</span><span>帮助中心</span></nav>{% endblock %}
+{% block content %}
+<div class="section-head">
+  <div>
+    <p class="eyebrow">HELP</p>
+    <h1>帮助中心</h1>
+  </div>
+</div>
+
+<div class="card"><div class="card-body">
+<div class="faq-section">
+  <h3 class="faq-heading">发布资源与技能</h3>
+  <details class="faq-item">
+    <summary>如何发布一条资源？</summary>
+    <p>登录后点击首页的快速发布框或「资源大厅」页的「发布资源」按钮。填写物品名称、类别、流转方式（免费借用/交换/赠送）和描述即可。图片为可选。</p>
+  </details>
+  <details class="faq-item">
+    <summary>技能服务怎么发布？</summary>
+    <p>选择类别为「技能服务」后，流转方式可选「免费互助」或「技能交换」。在描述中说明你能提供的帮助或期望交换的技能。</p>
+  </details>
+  <details class="faq-item">
+    <summary>我可以编辑或下架已发布的资源吗？</summary>
+    <p>可以。进入资源详情页，如果你是发布者，会看到「编辑」和「下架」按钮。</p>
+  </details>
+</div>
+
+<div class="faq-section">
+  <h3 class="faq-heading">申请与流转</h3>
+  <details class="faq-item">
+    <summary>如何申请借用或交换资源？</summary>
+    <p>在资源详情页点击「提交申请」，填写申请说明。如果资源是借用模式，还需要选择预计归还日期。提交后等待发布者审批。</p>
+  </details>
+  <details class="faq-item">
+    <summary>申请后如何归还或确认完成？</summary>
+    <p>在「流转记录」页面可以看到你的所有申请。借用中状态可点击「发起归还」，服务进行中可点击「确认完成」。发布者确认后流转结束。</p>
+  </details>
+  <details class="faq-item">
+    <summary>申请被拒绝了怎么办？</summary>
+    <p>发布者可能会附上拒绝原因。你可以联系对方沟通，或浏览其他同类资源重新提交申请。</p>
+  </details>
+</div>
+
+<div class="faq-section">
+  <h3 class="faq-heading">失物招领</h3>
+  <details class="faq-item">
+    <summary>如何发布寻物启事或拾物登记？</summary>
+    <p>在「失物招领」页面点击「发布寻物」或「登记拾物」。填写物品名称、描述、日期、地点和关键词，系统会自动匹配可能的对应信息。</p>
+  </details>
+  <details class="faq-item">
+    <summary>系统如何自动匹配？</summary>
+    <p>当你发布一条信息后，系统会根据标题和关键词的相似度，自动查找符合条件的对立类型信息（寻物 ↔ 拾物），匹配度高于 45% 的会展示在详情页底部。</p>
+  </details>
+</div>
+
+<div class="faq-section">
+  <h3 class="faq-heading">账号与通知</h3>
+  <details class="faq-item">
+    <summary>如何修改密码或个人信息？</summary>
+    <p>进入「个人中心」→「编辑资料」tab，修改姓名、联系方式、年级班级等信息，或在底部修改密码。</p>
+  </details>
+  <details class="faq-item">
+    <summary>通知在哪里查看？</summary>
+    <p>点击顶部导航栏的铃铛图标可以查看未读通知数量，点击进入通知中心查看全部通知详情。</p>
+  </details>
+  <details class="faq-item">
+    <summary>徽章怎么获得？</summary>
+    <p>发布资源、完成流转、解决失物招领等行为会自动获得徽章。在「个人中心」和「徽章墙」页面可以查看所有徽章和获得条件。</p>
+  </details>
+</div>
+</div></div>
+{% endblock %}

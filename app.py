@@ -945,6 +945,15 @@ def create_app(test_config=None) -> Flask:
             user_badge_map.setdefault(row["badge_id"], []).append(row)
         return render_template("badges.html", badges=all_badges, user_badge_map=user_badge_map, BADGE_TIER_COLORS=BADGE_TIER_COLORS)
 
+
+    @app.route("/guidelines")
+    def guidelines():
+        return render_template("guidelines.html")
+
+    @app.route("/help")
+    def help_page():
+        return render_template("help.html")
+
     return app
 
 
