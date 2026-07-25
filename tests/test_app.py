@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+import zipfile
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -438,10 +439,13 @@ class CampusAppTest(unittest.TestCase):
         with self.db() as db:
             first_counts = tuple(
                 db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in ("users", "resources", "applications", "lost_found", "notifications")
+                for table in (
+                    "users", "resources", "applications", "lost_found", "notifications",
+                    "posts", "tags", "comments",
+                )
             )
         self.assertTrue(
-            all(actual >= minimum for actual, minimum in zip(first_counts, (3, 3, 1, 2, 1)))
+            all(actual >= minimum for actual, minimum in zip(first_counts, (3, 3, 1, 2, 1, 5, 5, 1)))
         )
 
         second = runner.invoke(args=["init-demo"])
@@ -449,7 +453,10 @@ class CampusAppTest(unittest.TestCase):
         with self.db() as db:
             second_counts = tuple(
                 db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in ("users", "resources", "applications", "lost_found", "notifications")
+                for table in (
+                    "users", "resources", "applications", "lost_found", "notifications",
+                    "posts", "tags", "comments",
+                )
             )
         self.assertEqual(first_counts, second_counts)
 
@@ -957,6 +964,95 @@ class CampusAppTest(unittest.TestCase):
         self.client.post("/logout")
         self.login(username="bob")
         self.assertEqual(self.publish_post(title="禁言后发帖").status_code, 403)
+
+    def test_backup_cli_archives_database_uploads_and_guards_restore(self):
+        upload = Path(self.app.config["UPLOAD_FOLDER"]) / "proof.txt"
+        upload.write_text("backup proof", encoding="utf-8")
+        runner = self.app.test_cli_runner()
+
+        created = runner.invoke(args=["create-backup"])
+        self.assertEqual(created.exit_code, 0, created.output)
+        archives = list((Path(self.app.config["DATA_DIR"]) / "backups").glob("*.zip"))
+        self.assertEqual(len(archives), 1)
+        with zipfile.ZipFile(archives[0]) as archive:
+            self.assertIn("app.db", archive.namelist())
+            self.assertIn("uploads/proof.txt", archive.namelist())
+
+        guarded = runner.invoke(args=["restore-backup", archives[0].name])
+        self.assertNotEqual(guarded.exit_code, 0)
+        self.assertIn("--confirm", guarded.output)
+
+    def test_backup_retention_keeps_seven_daily_and_four_weekly(self):
+        runner = self.app.test_cli_runner()
+        for _ in range(8):
+            result = runner.invoke(args=["create-backup", "--kind", "daily"])
+            self.assertEqual(result.exit_code, 0, result.output)
+        for _ in range(5):
+            result = runner.invoke(args=["create-backup", "--kind", "weekly"])
+            self.assertEqual(result.exit_code, 0, result.output)
+        backup_dir = Path(self.app.config["DATA_DIR"]) / "backups"
+        self.assertEqual(len(list(backup_dir.glob("daily-*.zip"))), 7)
+        self.assertEqual(len(list(backup_dir.glob("weekly-*.zip"))), 4)
+
+    def test_admin_can_create_and_download_backup_but_student_cannot(self):
+        self.register()
+        self.login()
+        self.assertEqual(self.client.post("/admin/backups").status_code, 403)
+        with self.db() as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.commit()
+        self.client.post("/logout")
+        self.login()
+        self.assertEqual(self.client.post("/admin/backups").status_code, 302)
+        with self.db() as db:
+            filename = db.execute(
+                "SELECT filename FROM backup_records ORDER BY id DESC"
+            ).fetchone()[0]
+        response = self.client.get(f"/admin/backups/{filename}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Disposition"].split(";")[0], "attachment")
+        response.close()
+
+    def test_confirmed_restore_replaces_database_with_snapshot(self):
+        self.register()
+        runner = self.app.test_cli_runner()
+        created = runner.invoke(args=["create-backup"])
+        self.assertEqual(created.exit_code, 0, created.output)
+        archive = next((Path(self.app.config["DATA_DIR"]) / "backups").glob("manual-*.zip"))
+        with self.db() as db:
+            db.execute(
+                "INSERT INTO users(username,password_hash,name,student_no,grade,class_name) "
+                "VALUES('later','hash','Later','S999','2024级','测试班')"
+            )
+            db.commit()
+
+        restored = runner.invoke(args=["restore-backup", archive.name, "--confirm"])
+        self.assertEqual(restored.exit_code, 0, restored.output)
+        with self.db() as db:
+            self.assertIsNone(
+                db.execute("SELECT id FROM users WHERE username='later'").fetchone()
+            )
+
+    def test_only_admin_can_add_moderation_rules(self):
+        self.register()
+        self.login()
+        data = {"pattern": "代写", "severity": "review", "note": "疑似违规服务"}
+        self.assertEqual(self.client.post("/admin/moderation-rules", data=data).status_code, 403)
+        with self.db() as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.commit()
+        self.client.post("/logout")
+        self.login()
+        self.assertEqual(self.client.post("/admin/moderation-rules", data=data).status_code, 302)
+        with self.db() as db:
+            rule = db.execute(
+                "SELECT severity,note FROM moderation_rules WHERE pattern='代写'"
+            ).fetchone()
+            logged = db.execute(
+                "SELECT 1 FROM audit_logs WHERE action='moderation_rule_add'"
+            ).fetchone()
+        self.assertEqual(tuple(rule), ("review", "疑似违规服务"))
+        self.assertIsNotNone(logged)
 
 
 if __name__ == "__main__":

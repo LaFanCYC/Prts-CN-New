@@ -27,7 +27,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from community import audit, comments_for_target, create_community_blueprint, recommended_posts
-from db import default_data_dir, get_db, init_app as init_db_app, init_db
+from db import create_backup, default_data_dir, get_db, init_app as init_db_app, init_db
 
 
 RESOURCE_CATEGORIES = ("教材书籍", "实验器材", "电子设备", "文体用品", "学习资料", "技能服务", "其他")
@@ -878,6 +878,13 @@ def create_app(test_config=None) -> Flask:
                 "SELECT a.*,u.name actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id "
                 "ORDER BY a.created_at DESC,a.id DESC LIMIT 100"
             ).fetchall(),
+            backups=db.execute(
+                "SELECT b.*,u.name creator_name FROM backup_records b LEFT JOIN users u ON u.id=b.created_by "
+                "ORDER BY b.created_at DESC,b.id DESC LIMIT 20"
+            ).fetchall(),
+            moderation_rules=db.execute(
+                "SELECT * FROM moderation_rules ORDER BY is_active DESC,severity,pattern"
+            ).fetchall(),
         )
 
     @app.route("/api/admin/stats")
@@ -1040,6 +1047,49 @@ def create_app(test_config=None) -> Flask:
             (user_id,),
         )
         audit(db, g.user["id"], "user_restore", "user", user_id)
+        db.commit()
+        return redirect(url_for("admin"))
+
+    @app.post("/admin/backups")
+    @admin_required
+    def admin_backup_create():
+        archive = create_backup(
+            Path(current_app.config["DATA_DIR"]),
+            Path(current_app.config["DATABASE"]),
+            "manual",
+            g.user["id"],
+        )
+        db = get_db()
+        audit(db, g.user["id"], "backup_create", "backup", detail=archive.name)
+        db.commit()
+        flash("备份已创建。", "success")
+        return redirect(url_for("admin"))
+
+    @app.get("/admin/backups/<path:filename>")
+    @admin_required
+    def admin_backup_download(filename):
+        if Path(filename).name != filename:
+            abort(404)
+        return send_from_directory(
+            Path(current_app.config["DATA_DIR"], "backups"), filename, as_attachment=True
+        )
+
+    @app.post("/admin/moderation-rules")
+    @admin_required
+    def admin_moderation_rule_add():
+        pattern = request.form.get("pattern", "").strip()
+        severity = request.form.get("severity", "")
+        note = request.form.get("note", "").strip()
+        if not pattern or len(pattern) > 100 or severity not in {"reject", "review"} or len(note) > 200:
+            abort(400, "审核规则无效。")
+        db = get_db()
+        db.execute(
+            "INSERT INTO moderation_rules(pattern,severity,note) VALUES(?,?,?) "
+            "ON CONFLICT(pattern) DO UPDATE SET severity=excluded.severity,note=excluded.note,is_active=1",
+            (pattern, severity, note),
+        )
+        rule_id = db.execute("SELECT id FROM moderation_rules WHERE pattern=?", (pattern,)).fetchone()[0]
+        audit(db, g.user["id"], "moderation_rule_add", "moderation_rule", rule_id, note)
         db.commit()
         return redirect(url_for("admin"))
 
@@ -1292,6 +1342,52 @@ def _seed_demo():
         _notify(
             db, user_id, "演示：发现一条可能匹配的校园卡信息",
             f"/lost-found/{target_id}", f"demo-match:{user_id}",
+        )
+    demo_posts = (
+        (ids["student01"], "resource", "高数教材使用心得", "整理了几条高数教材借阅和复习建议。", ("教材", "高数")),
+        (ids["student02"], "lost_found", "失物信息怎样写更容易匹配", "请写清日期、地点、颜色和明显特征。", ("失物", "帮助")),
+        (ids["student01"], "study", "Python 学习小组招募", "每周三晚上一起练习 Python 基础。", ("python", "学习")),
+        (ids["student02"], "campus", "校园摄影活动记录", "欢迎分享校园里值得记录的瞬间。", ("摄影", "校园")),
+        (ids["student01"], "feedback", "关于资源分类的建议", "建议发布时选择准确分类，方便同学检索。", ("建议", "资源")),
+    )
+    post_ids = {}
+    for author_id, section, title, body, tag_names in demo_posts:
+        row = db.execute("SELECT id FROM posts WHERE author_id=? AND title=?", (author_id, title)).fetchone()
+        post_id = row[0] if row else db.execute(
+            "INSERT INTO posts(author_id,section,title,body) VALUES(?,?,?,?)",
+            (author_id, section, title, body),
+        ).lastrowid
+        post_ids[title] = post_id
+        for tag_name in tag_names:
+            db.execute("INSERT OR IGNORE INTO tags(name) VALUES(?)", (tag_name,))
+            tag_id = db.execute("SELECT id FROM tags WHERE name=?", (tag_name,)).fetchone()[0]
+            db.execute("INSERT OR IGNORE INTO post_tags(post_id,tag_id) VALUES(?,?)", (post_id, tag_id))
+    study_post = post_ids["Python 学习小组招募"]
+    if db.execute(
+        "SELECT 1 FROM comments WHERE author_id=? AND target_type='post' AND target_id=? AND body=?",
+        (ids["student02"], study_post, "我也想参加，请问几点开始？"),
+    ).fetchone() is None:
+        db.execute(
+            "INSERT INTO comments(author_id,target_type,target_id,body) VALUES(?,'post',?,?)",
+            (ids["student02"], study_post, "我也想参加，请问几点开始？"),
+        )
+    db.execute(
+        "INSERT OR IGNORE INTO user_follows(follower_id,followed_id) VALUES(?,?)",
+        (ids["student02"], ids["student01"]),
+    )
+    python_tag = db.execute("SELECT id FROM tags WHERE name='python'").fetchone()[0]
+    db.execute(
+        "INSERT OR IGNORE INTO tag_follows(user_id,tag_id) VALUES(?,?)",
+        (ids["student02"], python_tag),
+    )
+    feedback_post = post_ids["关于资源分类的建议"]
+    if db.execute(
+        "SELECT 1 FROM reports WHERE reporter_id=? AND target_type='post' AND target_id=?",
+        (ids["student02"], feedback_post),
+    ).fetchone() is None:
+        db.execute(
+            "INSERT INTO reports(reporter_id,target_type,target_id,reason) VALUES(?,'post',?,'演示举报：请管理员复核')",
+            (ids["student02"], feedback_post),
         )
     db.commit()
 

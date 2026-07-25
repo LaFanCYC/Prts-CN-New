@@ -1,295 +1,160 @@
-# 校园智享——资源智能流转平台实施计划
+# 校园智享社区化增强 Implementation Plan
+
+**实施状态：** 已于 2026-07-25 完成，最终验收命令为 `python -m unittest -v`。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**目标：** 在当天完成一个可本地运行的校园资源流转与失物招领 Web 应用，覆盖用户、资源、流转、匹配通知、管理和统计基础功能。
+**Goal:** 在不改变现有资源流转和失物招领流程的前提下，增加轻量校园社区、治理闭环、备份与可解释推荐。
 
-**架构：** 使用 Flask 单体应用同时承载 WebUI 与后端，SQLite 保存业务数据，HTML 模板与原生 CSS/JavaScript 构建响应式中文界面。图片保存在本机可写数据目录，数据库仅记录随机文件名；目录设计兼容后续 PyInstaller 打包。
+**Architecture:** 保持 Flask + SQLite 单体。新增 `community.py` 承载帖子、互动、评论和推荐查询，并通过工厂函数接收既有认证、上传和通知函数，避免与 `app.py` 循环导入；`app.py` 继续持有应用工厂、现有流程和通用上传能力。社区文本只以 Jinja 自动转义后的纯文本显示，不引入 Markdown、HTML 解析器、机器学习框架或异步任务队列。
 
-**技术栈：** Python 3.11+、Flask、Waitress、SQLite、Jinja2、Werkzeug、HTML/CSS/JavaScript、`unittest`
+**Tech Stack:** Python 3.11+、Flask、SQLite、Jinja2、Werkzeug、stdlib `sqlite3`/`zipfile`、原生 CSS/JavaScript、`unittest`。
 
-## 全局约束
+## 已确认范围
 
-- 本期只完成已确认的基础功能，不使用 Docker，不生成 `.exe`。
-- 后期使用 PyInstaller 生成 Windows `.exe`；数据库、密钥和上传图片不得写入打包资源目录。
-- 不引入前端框架、ORM、AI 模型、短信、邮件、微信通知或对象存储。
-- 使用 Werkzeug 密码哈希、CSRF 令牌、服务端权限校验和安全文件名，不能用前端隐藏按钮代替权限控制。
-- 所有界面和提示使用中文，适配电脑与手机。
-- WebUI 采用服务端表单提交，只为搜索、通知和统计提供必要 JSON 接口。
+- 产品仍以资源流转为主；社区提供资源交流、失物招领、学习问答、校园生活、建议反馈五个固定分区。
+- 首期有帖子、单层评论/回复、点赞、收藏、关注用户和标签、带短评的转发、`@用户名`、举报和站内通知；不做私信、工单、用户自建分区、富文本、Markdown 或外部图床。
+- 资源详情和失物详情也有统一评论区；申请、审批和联系方式继续走原有私有流程。
+- 帖子每篇最多一张 JPEG/PNG/WebP，最大 5 MB，沿用受控本地上传；不支持 SVG/GIF。
+- 推荐只用分区、标签/关键词、时效、热度和已登录用户行为的规则评分。不引入 `scikit-learn`、`implicit` 或 Torch-RecHub；后两者只在真实数据积累后离线评估。
+- 公开注册维持不变，不记录或使用 IP；本期只支持本地/受控演示，不承诺公网部署。现有 CSRF、权限校验、参数化 SQL 和上传白名单不可削弱。
+- 自动审核按“拒绝 / 待审 / 发布”三档执行，管理员可下架、恢复、禁言、封禁并审计；内容规则由管理员维护。
+- 不提供“减少此类推荐”、兴趣清除或在线数据库恢复。备份可由管理员创建/下载，恢复仅允许停机 CLI；保留 7 个日备份和 4 个周备份。
+
+## 文件结构
+
+- 修改 `app.py`：注册社区 Blueprint、保留现有资源/失物详情并注入评论区、注册静态帮助页和备份 CLI。
+- 新建 `community.py`：社区路由、表单校验、内容目标校验、互动、通知、审核前筛和规则推荐。
+- 修改 `db.py`：实现 SQLite 一致性备份、归档上传目录、备份轮换和仅 CLI 的恢复。
+- 修改 `schema.sql`：新增社区、治理、行为和备份表与索引；不修改既有业务表。
+- 新建 `templates/community_*.html`：帖子列表、详情、表单、关注流与静态规则/帮助页。
+- 修改 `templates/base.html`、`home.html`、`resource_detail.html`、`lost_found_detail.html`、`admin.html`：导航、面包屑、首页三列表、通用评论区和治理/备份区。
+- 修改 `static/app.css`、`static/app.js`：移除首页 Hero、增加紧凑列表、评论与面包屑样式；只保留必要交互。
+- 修改 `tests/test_app.py`：为每个新增状态、所有权边界和备份流程增加集成测试。
+- 修改 `README.md`：说明社区边界、备份命令、受控演示限制和图片规则。
 
 ---
 
-## 一、已确认的产品范围
-
-### 1. 用户与权限
-
-- 角色只有“学生”和“管理员”；资源发布者是业务身份，不增加第三种角色。
-- 学生注册字段：用户名、密码、姓名、学号、年级、班级。
-- 用户名和学号全局唯一。
-- 学生可修改姓名、年级、班级、联系方式和密码，不能自行修改用户名与学号。
-- 管理员可更正用户资料、修改学生/管理员角色、启用或禁用账号。
-- 管理员账号只能由初始化命令或现有管理员创建，注册页面不能注册管理员。
-
-### 2. 学习资源
-
-- 发布字段：资源名称、类别、新旧程度、流转方式、描述、关键词、图片。
-- 固定类别：教材书籍、实验器材、电子设备、文体用品、学习资料、技能服务、其他。
-- 实体资源流转方式：免费借用、交换、赠送；技能服务流转方式：免费互助、技能交换。
-- 实体资源新旧程度：全新、九成新、七成新、明显使用痕迹；技能服务为“不适用”。
-- 图片可选；允许 JPG、PNG、WebP，最大 5 MB。
-- 图片保存到本地可写 `uploads/` 目录，使用随机文件名，禁止按用户文件名直接落盘。
-- 搜索支持名称/描述关键词，并按类别、流转方式、新旧程度和可用状态筛选；结果按发布时间倒序。
-- 发布者可编辑没有待审批申请的可用资源；从未产生申请时可删除，已有历史时只能下架。
-
-### 3. 申请与流转
-
-- 免费借用状态：`待审批 → 借用中 → 待确认归还 → 已归还`；拒绝后为`已拒绝`。
-- 借用人发起归还，资源发布者确认归还。
-- 赠送、交换：申请人填写备注；发布者同意后直接进入`流转完成`，没有归还步骤。
-- 同一资源允许多人提交待审批申请。
-- 发布者同意一人时，在同一个数据库事务中自动拒绝该资源的其他待审批申请。
-- 借用资源确认归还后重新变为可申请；赠送和交换完成后永久关闭。
-- 免费借用申请必须填写预计归还日期；系统在访问页面时标记逾期并只生成一次站内提醒，不运行后台定时任务。
-- 技能服务状态：`待审批 → 服务进行中 → 待对方确认 → 已完成`；发布者提交完成，申请人确认。
-- 技能服务可重复提供，同一时间只接受一人，完成后自动重新开放，其他待审批申请继续保留。
-- 申请人可撤销待审批申请；进入借用中或服务进行中后，只能由管理员处理异常。
-- 借用和赠送备注可选，交换必须说明交换物品；发布者拒绝时必须填写原因。
-- 自动记录申请、审批、开始、发起归还或完成、最终确认等时间，并展示流转时间线。
-- 只有申请人、资源发布者及管理员能查看相关申请详情；审批只能由发布者执行。
-
-### 4. 失物招领与匹配
-
-- 支持发布“寻物启事”和“拾物登记”。
-- 字段：物品名称、描述、发生日期、地点、关键词、可选图片、状态和发布时间；关键词至少一个。
-- 匹配使用关键词重合与名称相似度，不调用外部 AI。
-- 新记录只与类型相反且状态为“未解决”的记录比较，达到阈值后生成匹配记录和双方站内通知。
-- 记录状态为“未解决”或“已解决”；发布者和管理员可标记已解决。
-- 已解决记录继续保留且可搜索，可按“全部/未解决/已解决”筛选，但不参与自动匹配。
-- 匹配通知只使用站内通知；支持未读/已读和跳转到对应记录。
-- 发布者可编辑未解决记录，编辑后重新匹配；已解决记录须先恢复为未解决才能编辑。
-- 登录用户可查看失物详情中的联系方式并人工联系发布者，不增加认领申请流程。
-
-### 5. 管理与统计
-
-- 管理员可查看全部用户，修改角色，启用/禁用账号，删除违规资源和失物信息。
-- 管理员以“下架”代替物理删除，保留历史记录；账号只禁用、不物理删除。
-- 忘记密码由管理员重置临时密码，用户登录后自行修改。
-- 统计首页显示：用户总数、资源总数、待审批数、借用中数、已完成流转数、寻物数、拾物数、成功匹配数。
-- 按资源类别和流转方式显示柱状统计。
-- 本期不做数据导出、自定义时间筛选和复杂分析。
-
-### 6. 演示与运行
-
-- 提供初始化命令，创建一个管理员、两个学生账号和少量资源、申请、失物示例。
-- 演示密码只用于本地展示，README 必须列明并提示修改。
-- 提供 `requirements.txt`、初始化命令、启动命令和最短验收步骤。
-- 使用 Waitress 支持本机演示及校园局域网小规模访问，不宣称可直接用于公网生产环境。
-- 页面使用“展开的书本 + 双向循环箭头”蓝绿 SVG Logo，并统一使用“校园智享”名称。
-- 游客可浏览和搜索，但看不到联系方式，也不能发布、申请或查看通知。
-- 列表每页 12 条，导航展示未读通知数并支持全部标为已读。
-- 密码至少 8 位并二次确认；标题最多 50 字、描述 1000 字、备注/拒绝原因 300 字、联系方式 100 字，均由后端校验。
-
-## 二、计划文件结构
-
-```text
-main/
-├── app.py                  # 应用工厂、路由、权限、业务流程和 CLI 初始化命令
-├── db.py                   # SQLite 连接、建表、事务和查询辅助函数
-├── schema.sql              # 表结构、索引与唯一约束
-├── requirements.txt        # Flask 与 Waitress
-├── init_linux.sh           # Linux 环境、数据库与管理员初始化
-├── start_linux.sh          # Linux Waitress 启动入口
-├── init_windows.bat        # Windows 环境、数据库与管理员初始化
-├── start_windows.bat       # Windows Waitress 启动入口
-├── README.md               # 安装、初始化、启动、演示账号和打包注意事项
-├── static/
-│   ├── app.css             # 响应式蓝绿色校园风格
-│   └── app.js              # 筛选、通知和必要的渐进增强
-├── static/logo.svg         # 书本与流转箭头组成的校园智享 Logo
-├── templates/
-│   ├── base.html
-│   ├── auth.html
-│   ├── home.html
-│   ├── profile.html
-│   ├── resources.html
-│   ├── resource_form.html
-│   ├── resource_detail.html
-│   ├── applications.html
-│   ├── lost_found.html
-│   ├── lost_found_form.html
-│   ├── lost_found_detail.html
-│   ├── notifications.html
-│   └── admin.html
-└── tests/
-    └── test_app.py         # 权限、资源流转、匹配和统计的最小集成检查
-```
+### Task 1: 社区数据模型与可重复初始化
+
+**Files:**
+- Modify: `schema.sql`, `tests/test_app.py`
 
-运行期数据不提交到源码目录；由 `db.py` 统一解析可写位置：Windows 优先 `%LOCALAPPDATA%/CampusSmartFlow/`，其他系统使用用户数据目录。该目录包含 `app.db`、`secret.key` 和 `uploads/`。
+**Produces:** `posts`、`tags`、`post_tags`、`comments`、`content_reactions`、`user_follows`、`tag_follows`、`reposts`、`reports`、`moderation_rules`、`account_restrictions`、`audit_logs`、`behavior_events`、`backup_records` 表及目标查询索引。
 
-## 三、数据模型
-
-### `users`
-
-`id, username, password_hash, name, student_no, grade, class_name, contact, role, is_active, must_change_password, created_at`
-
-- `username`、`student_no` 唯一。
-- `role` 只允许 `student/admin`。
-- 禁用用户不能登录；现有数据保留。
-
-### `resources`
-
-`id, owner_id, name, category, condition_level, transfer_mode, description, keywords, image_name, status, created_at`
-
-- `transfer_mode`：`borrow/exchange/gift/free_help/skill_exchange`。
-- `status`：`available/in_use/in_service/completed/withdrawn`。
-
-### `applications`
-
-`id, resource_id, applicant_id, note, rejection_reason, expected_return_date, applied_at, approved_at, action_at, completed_at, status, created_at, updated_at`
-
-- `status`：`pending/borrowed/return_pending/returned/rejected/completed/in_service/completion_pending/withdrawn`。
-- 禁止用户申请自己的资源，禁止同一用户对同一资源重复提交待处理申请。
-
-### `lost_found`
-
-`id, user_id, kind, title, description, occurred_on, location, keywords, image_name, status, created_at`
-
-- `kind`：`lost/found`。
-- `status`：`open/resolved`。
-
-### `matches`
-
-`id, lost_id, found_id, score, created_at`
-
-- `(lost_id, found_id)` 唯一，防止重复通知。
-
-### `notifications`
-
-`id, user_id, message, target_url, is_read, created_at`
-
-## 四、实施任务
-
-### Task 1：应用骨架、数据库和身份系统
-
-**文件：** `app.py`、`db.py`、`schema.sql`、`requirements.txt`、`templates/base.html`、`templates/auth.html`、`templates/profile.html`、`tests/test_app.py`
-
-**产出接口：**
-
-- `create_app(test_config=None) -> Flask`
-- `get_db() -> sqlite3.Connection`
-- `init_db() -> None`
-- `login_required(view)`、`admin_required(view)`
-- CLI：`flask --app app init-demo`
-
-- [ ] 先写集成检查：注册成功、重复学号失败、密码以哈希保存、禁用账号不能登录、学生不能访问管理页。
-- [ ] 运行 `python -m unittest tests.test_app -v`，确认检查失败。
-- [ ] 建立六张业务表、必要索引、外键与唯一约束。
-- [ ] 实现注册、登录、退出、资料修改、修改密码、会话和 CSRF 校验。
-- [ ] 实现学生/管理员装饰器与每个写操作的服务端所有权检查。
-- [ ] 再次运行测试，以上身份与权限检查必须通过。
-
-### Task 2：资源发布、图片与搜索
-
-**文件：** `app.py`、`templates/resources.html`、`templates/resource_form.html`、`templates/resource_detail.html`、`static/app.css`、`tests/test_app.py`
-
-**产出接口：**
-
-- `save_image(file) -> str | None`
-- `GET /resources`
-- `GET|POST /resources/new`
-- `GET /resources/<int:id>`
-
-- [ ] 添加检查：匿名用户不能发布；合法图片可保存；扩展名伪装或超过 5 MB 被拒绝；组合筛选返回正确资源。
-- [ ] 实现发布校验、图片头检测、随机文件名和受控图片读取路由。
-- [ ] 实现关键词、类别、方式、新旧程度、状态筛选及倒序分页列表。
-- [ ] 完成响应式资源卡片、详情页和空结果提示。
-- [ ] 运行 `python -m unittest tests.test_app -v`，确认资源检查通过。
-
-### Task 3：申请、审批和归还事务
-
-**文件：** `app.py`、`templates/resource_detail.html`、`templates/applications.html`、`tests/test_app.py`
-
-**产出接口：**
-
-- `POST /resources/<int:id>/apply`
-- `POST /applications/<int:id>/approve`
-- `POST /applications/<int:id>/reject`
-- `POST /applications/<int:id>/request-return`
-- `POST /applications/<int:id>/confirm-return`
-
-- [ ] 添加完整流程检查：借用申请、审批、发起归还、确认归还和资源重新开放。
-- [ ] 添加并发规则检查：批准一名申请人后，其余待审批申请自动拒绝。
-- [ ] 添加交换/赠送检查：同意后直接完成且资源关闭。
-- [ ] 在事务中实现状态机，只允许合法的下一步状态；非法越权或重复请求返回 403/409。
-- [ ] 为申请人和发布者生成审批、拒绝、归还相关站内通知。
-- [ ] 运行全部测试，确认三类流转均通过。
-
-### Task 4：失物招领、自动匹配与通知
-
-**文件：** `app.py`、`templates/lost_found.html`、`templates/lost_found_form.html`、`templates/lost_found_detail.html`、`templates/notifications.html`、`tests/test_app.py`
-
-**产出接口：**
-
-- `match_score(left, right) -> float`
-- `create_matches(record_id) -> list[int]`
-- `GET /lost-found`
-- `GET|POST /lost-found/new/<kind>`
-- `POST /lost-found/<int:id>/resolve`
-- `GET /notifications`、`POST /notifications/<int:id>/read`、`POST /notifications/read-all`
-
-- [ ] 添加确定性检查：相同关键词及相似名称超过阈值；无关记录低于阈值；同类记录不匹配；已解决记录不匹配。
-- [ ] 使用标准库归一化文本、关键词集合重合和 `difflib.SequenceMatcher` 计算固定分数。
-- [ ] 新建记录后匹配相反类型的未解决记录，并依靠唯一约束防止重复匹配。
-- [ ] 为双方创建带详情链接的通知，实现已读/未读状态。
-- [ ] 实现关键词和“全部/未解决/已解决”筛选。
-- [ ] 运行全部测试，确认匹配与通知检查通过。
-
-### Task 5：管理员管理与统计报表
-
-**文件：** `app.py`、`templates/admin.html`、`static/app.css`、`tests/test_app.py`
-
-**产出接口：**
-
-- `GET /admin`
-- `POST /admin/users/<int:id>/role`
-- `POST /admin/users/<int:id>/active`
-- `POST /admin/resources/<int:id>/delete`
-- `POST /admin/lost-found/<int:id>/delete`
-- `GET /api/admin/stats`
-
-- [ ] 添加检查：学生访问所有管理写接口均为 403；管理员可禁用用户和删除内容；不能禁用或降级最后一个有效管理员。
-- [ ] 使用聚合 SQL 生成已确认的八项总数、类别分组和流转方式分组。
-- [ ] 用 HTML/CSS 绘制统计卡片和柱状图，不增加图表依赖。
-- [ ] 实现用户表、内容管理操作和二次确认。
-- [ ] 运行全部测试，确认权限和统计数值正确。
-
-### Task 6：演示数据、整体验收与文档
-
-**文件：** `app.py`、`README.md`、`static/app.css`、`static/app.js`、`tests/test_app.py`
-
-**产出接口：** CLI `flask --app app init-demo`
-
-- [ ] 初始化管理员、两个学生、示例资源、申请、寻物、拾物和通知；重复执行不能重复插入。
-- [ ] 统一中文导航、状态标签、表单错误、403/404/413 页面和手机布局。
-- [ ] README 写明 Python 环境、安装、初始化、启动、演示账号、数据目录、5 MB 限制及未来 PyInstaller 数据路径要求。
-- [ ] 运行 `python -m unittest -v`，所有检查通过。
-- [ ] 从空数据目录执行初始化并启动，手工完成一次“注册→发布→申请→审批→归还”和一次“寻物→拾物→匹配通知”。
-
-## 五、验收标准
-
-- 未登录用户可浏览和搜索，但发布、申请及个人页必须登录。
-- 学生无法通过直接构造请求访问管理员操作或审批他人资源。
-- 三类资源流转均遵循已确认状态，不能跳过或倒退状态。
-- 同一资源最多有一个获批申请，审批不会留下多个有效申请。
-- 图片限制、密码哈希、CSRF、账号禁用和最后管理员保护均有效。
-- 新寻物/拾物能自动生成不重复的双向站内通知；已解决记录可筛选但不再匹配。
-- 管理报表数字与数据库实际数据一致。
-- 在全新环境按 README 可完成安装、初始化和启动。
-
-## 六、明确不做
-
-- Docker、Windows `.exe` 打包、云部署、对象存储、数据备份与在线恢复。
-- 邮件、短信、微信或推送服务。
-- AI 大模型、向量数据库、复杂推荐系统。
-- 多图、聊天、支付、信用积分、数据导出、自定义报表时间范围、失物认领申请。
-- 未经确认的完整前后端分离与全量 REST API。
+- [ ] **Step 1: 写失败测试**：新数据库初始化后断言全部社区表存在；验证同一用户不能重复点赞、收藏、关注用户或关注标签。
+- [ ] **Step 2: 运行 `python -m unittest tests.test_app.CampusAppTest -v`**，确认新表断言失败。
+- [ ] **Step 3: 在 `schema.sql` 创建表与约束**：帖子状态仅为 `published/pending/withdrawn`；评论状态仅为 `published/withdrawn`；评论目标仅允许 `post/resource/lost_found`；反应目标仅允许这三类内容；报告目标额外允许 `comment`；反应种类仅为 `like/favorite`；报告状态仅为 `open/resolved/rejected`。为 `(target_type,target_id,status,created_at)`、`(user_id,created_at)` 和所有唯一互动组合建索引。
+- [ ] **Step 4: 实现前先明确目标完整性规则**：`comments` 和 `content_reactions` 的多态目标由服务端验证，不伪造 SQLite 外键；`posts`、`tags`、`users` 使用外键。
+- [ ] **Step 5: 重跑完整测试**，确认旧数据初始化仍可工作且新约束有效。
+- [ ] **Step 6: Commit**：`git commit -am "feat: add community schema"`。
+
+### Task 2: 帖子、标签、关注与转发
+
+**Files:**
+- Create: `community.py`, `templates/community_list.html`, `templates/community_detail.html`, `templates/community_form.html`, `templates/community_following.html`
+- Modify: `app.py`, `static/app.css`, `tests/test_app.py`
+
+**Interfaces:**
+- Produces: `create_community_blueprint(login_required, save_image, notify) -> Blueprint`; `validate_post_form(form) -> tuple[dict | None, str | None]`; `target_exists(db, target_type, target_id) -> bool`。
+- Routes: `GET /community`、`GET|POST /community/new`、`GET /community/<int:post_id>`、`GET|POST /community/<int:post_id>/edit`、`POST /community/<int:post_id>/withdraw`、`POST /community/users/<int:user_id>/follow`、`POST /community/tags/<int:tag_id>/follow`、`GET /community/following`、`POST /community/<int:post_id>/repost`。
+
+- [ ] **Step 1: 写失败测试**：匿名用户可浏览帖子，登录用户可在固定分区发布标题（50 字）、正文（2,000 字）及 1–5 个规范化标签；非作者编辑返回 403；已下架帖子返回 404。
+- [ ] **Step 2: 写失败测试**：关注用户/标签幂等；关注流只显示所关注用户的新帖或含所关注标签的帖子；转发最多 300 字短评且只指向原帖，不创建转发链。
+- [ ] **Step 3: 注册 Blueprint**：在 `create_app()` 调用 `app.register_blueprint(create_community_blueprint(login_required, save_image, _notify))`；通过参数复用认证、上传和通知，不从 `community.py` 导入 `app.py`。
+- [ ] **Step 4: 实现最小帖子流程**：纯文本以 `white-space: pre-wrap` 显示；标签去空白、统一小写英文和原中文；原帖下架后转发页显示“原内容不可用”；带图片的帖子固定进入 `pending`，直到管理员人工发布。
+- [ ] **Step 5: 运行新增帖子与关注测试**，确认帖子不暴露联系方式且转发不改变原帖计数。
+- [ ] **Step 6: Commit**：`git add app.py community.py schema.sql templates static tests && git commit -m "feat: add community posts and follows"`。
+
+### Task 3: 统一评论、回复、反应与通知
+
+**Files:**
+- Modify: `community.py`, `app.py`, `templates/community_detail.html`, `templates/resource_detail.html`, `templates/lost_found_detail.html`, `templates/notifications.html`, `tests/test_app.py`
+
+**Interfaces:**
+- Produces: `comments_for_target(db, target_type, target_id, order) -> list[sqlite3.Row]`; `assert_comment_target(db, target_type, target_id) -> None`。
+- Routes: `POST /comments/<target_type>/<int:target_id>`、`POST /comments/<int:comment_id>/reply`、`POST /comments/<int:comment_id>/withdraw`、`POST /reactions/<target_type>/<int:target_id>/<kind>`。
+
+- [ ] **Step 1: 写失败测试**：登录用户能评论帖子、资源和失物；访客只读；回复不能再回复；评论正文最多 1,000 字；所有权以外的删除返回 403。
+- [ ] **Step 2: 写失败测试**：同一用户对同一目标点赞/收藏可切换且只保留一条记录；评论、回复、`@用户名`、转发和治理结果才创建通知，点赞、收藏、关注不创建通知。
+- [ ] **Step 3: 实现目标校验与评论查询**：对资源检查未下架状态，对失物检查未下架状态，对帖子检查已发布状态；资源申请和失物联系人字段不写入评论模板。
+- [ ] **Step 4: 实现单层回复与排序**：评论只允许 `parent_id IS NULL`，回复的 `parent_id` 必须指向顶层评论；列表支持 `new`（创建时间倒序）和 `hot`（点赞数、回复数、创建时间）两种固定排序。
+- [ ] **Step 5: 实现纯文本 `@`**：仅匹配现有用户名，通知被提及用户；显示时仍由 Jinja 转义，不能输出 HTML。
+- [ ] **Step 6: 运行评论、私有申请和通知测试**，确认跨目标越权与嵌套回复均被拒绝。
+- [ ] **Step 7: Commit**：`git commit -am "feat: add shared comments and reactions"`。
+
+### Task 4: 首页重排、面包屑与静态社区文档
+
+**Files:**
+- Create: `templates/community_rules.html`, `templates/community_help.html`, `templates/questioning_guide.html`
+- Modify: `app.py`, `templates/base.html`, `templates/home.html`, `static/app.css`, `static/app.js`, `tests/test_app.py`
+
+**Interfaces:**
+- Routes: `GET /rules`、`GET /help`、`GET /questioning-guide`。
+
+- [ ] **Step 1: 写失败测试**：首页响应不含旧 Hero 标题和 `.hero`，同时含“推荐帖子”“最新资源”“失物招领”三个独立列表；每个列表最多 6 条。
+- [ ] **Step 2: 在首页查询三类数据**：推荐帖子由 Task 5 的函数提供；资源和失物分别按现有可见状态与创建时间倒序查询，不能混入已下架内容。
+- [ ] **Step 3: 修改基础模板**：社区、规则、帮助入口加入导航；非首页模板显示当前位置面包屑，首页不显示面包屑。
+- [ ] **Step 4: 写静态页面**：规则说明发布、举报、审核、禁言和申诉；帮助页说明资源申请与失物联系边界；《提问的智慧》用本项目自己的提问清单表达，不复制外部文章。
+- [ ] **Step 5: 运行模板测试和手动窄屏检查**，确认无 Hero 残留、三个列表独立且导航在手机宽度换行可用。
+- [ ] **Step 6: Commit**：`git commit -am "feat: simplify home and add community guidance"`。
+
+### Task 5: 行为记录与轻量规则推荐
+
+**Files:**
+- Modify: `community.py`, `app.py`, `templates/community_list.html`, `templates/home.html`, `tests/test_app.py`
+
+**Interfaces:**
+- Produces: `record_behavior(db, user_id, event_type, target_type, target_id) -> None`; `recommended_posts(db, user_id | None, limit=6) -> list[sqlite3.Row]`。
+- Event types: `view_post`、`view_section`、`like`、`favorite`、`comment`、`repost`。
+
+- [ ] **Step 1: 写失败测试**：未登录用户收到按近期热度排序的帖子；登录用户点赞或收藏某标签后，同标签的另一篇帖子排序更靠前；用户自己已互动过的帖子不重复计分。
+- [ ] **Step 2: 实现事件去重**：同一用户对同一目标的详情浏览每天只记录一次；点赞、收藏、评论和转发在事务完成后记录一次；匿名访问不落行为表。
+- [ ] **Step 3: 实现单条 SQL 可解释评分**：标签/关键词匹配 60 分、7 天内时效最高 25 分、点赞/收藏/评论/转发热度最高 15 分；没有用户事件时只使用时效与热度。查询返回各分项，页面仅显示“为你推荐”，审计日志可查看分数来源。
+- [ ] **Step 4: 验证分区混排**：首页最多 6 篇推荐中，同分区、邻近分区、较远分区的候选上限按 `60% / 30% / 10%` 取整；邻近关系固定为“资源交流→学习问答/建议反馈、失物招领→校园生活/资源交流、学习问答→资源交流/校园生活、校园生活→失物招领/学习问答、建议反馈→校园生活/资源交流”，其余为较远分区；候选不足时以最新发布补齐。
+- [ ] **Step 5: 运行推荐测试**，确认不新增 `requirements.txt` 依赖，也不调用网络、模型训练或 GPU。
+- [ ] **Step 6: Commit**：`git commit -am "feat: add rule based recommendations"`。
+
+### Task 6: 自动审核、举报、账号限制和管理员审计
+
+**Files:**
+- Modify: `community.py`, `app.py`, `templates/admin.html`, `templates/community_detail.html`, `tests/test_app.py`
+
+**Interfaces:**
+- Produces: `screen_content(db, text, has_image=False) -> tuple[str, str]`; `audit(db, actor_id, action, target_type, target_id, detail) -> None`。
+- Routes: `POST /reports/<target_type>/<int:target_id>`、`POST /admin/reports/<int:report_id>/<action>`、`POST /admin/users/<int:user_id>/restrict`、`POST /admin/users/<int:user_id>/restore`、`GET /admin/audit`。
+
+- [ ] **Step 1: 写失败测试**：高严重度规则拒绝发布，普通风险规则令帖子进入待审，未命中规则直接发布；普通用户不能查看或处理举报。
+- [ ] **Step 2: 实现规则读取**：`moderation_rules` 保存匹配词、严重度（`reject/review`）、启用状态和管理员说明；文本归一化后匹配标题、正文、评论与转发短评，命中原因只对管理员可见；任何带图片的帖子返回 `review`，不假装已有图片识别能力。
+- [ ] **Step 3: 实现举报闭环**：每用户每目标只可有一个未解决举报；管理员可驳回、下架、恢复或限制账号；动作写入 `audit_logs` 并向当事人发站内通知。
+- [ ] **Step 4: 实现账号限制**：禁言阻止发帖、评论、转发和举报但不阻止浏览；临时封禁阻止登录直到截止时间；永久封禁继续复用 `users.is_active=0`。所有限制仅按账号执行，不存储 IP。
+- [ ] **Step 5: 管理页只展示可操作的最近记录**：举报队列、待审帖子、活跃限制、最近 100 条审计日志；不做复杂检索或在线恢复。
+- [ ] **Step 6: 运行治理测试**，确认受限用户无法写入、管理员操作可追溯、最后有效管理员保护仍有效。
+- [ ] **Step 7: Commit**：`git commit -am "feat: add community moderation controls"`。
+
+### Task 7: 备份、恢复说明、演示数据与文档
+
+**Files:**
+- Modify: `db.py`, `app.py`, `templates/admin.html`, `README.md`, `tests/test_app.py`
+
+**Interfaces:**
+- CLI: `flask --app app create-backup`、`flask --app app restore-backup <archive>`。
+- Produces: `create_backup(data_dir: Path, database: Path) -> Path`; `prune_backups(backup_dir: Path) -> None`。
+
+- [ ] **Step 1: 写失败测试**：备份 archive 包含 `app.db` 和 `uploads/`；创建第 8 个日备份后最早日备份被移除；恢复命令在未显式 `--confirm` 时拒绝执行。
+- [ ] **Step 2: 实现一致性备份**：使用 `sqlite3.Connection.backup()` 写入临时数据库，再用 `zipfile` 打包数据库和上传目录；完成后原子移动到 `DATA_DIR/backups/` 并写入 `backup_records`。
+- [ ] **Step 3: 实现保留规则**：保留最近 7 个按日创建的 archive，以及最近 4 个按周创建的 archive；删除前只处理该备份目录下匹配命名规则的文件。
+- [ ] **Step 4: 实现恢复 CLI**：仅在应用停止时运行；先创建恢复前备份，再解压指定 archive 覆盖数据库与上传目录；`--confirm` 缺失时退出非零。管理员后台只提供创建和下载，不提供恢复按钮。
+- [ ] **Step 5: 更新演示和 README**：演示数据包含五分区帖子、标签、关注、评论和举报；README 写明备份、恢复、图片上限、无公网部署承诺及推荐算法边界。
+- [ ] **Step 6: 运行 `python -m unittest -v`**，确认全部集成测试通过，并用空数据目录执行 `init-demo`、创建备份和恢复演练。
+- [ ] **Step 7: Commit**：`git commit -am "feat: add backups and community operations"`。
+
+## 验收标准
+
+- 首页没有大彩色 Hero，且“推荐帖子 / 最新资源 / 失物招领”三个列表独立显示。
+- 帖子、资源和失物都有登录可写、访客可读的单层评论；申请数据和联系方式不通过评论泄露。
+- 五个固定分区、用户/标签关注、点赞、收藏、受限转发和 `@` 通知均可用；点赞、收藏、关注不会制造通知。
+- 社区内容仅支持纯文本和一张受控图片；Jinja 渲染不执行用户输入的 HTML。
+- 推荐在无行为数据时可用，登录用户的标签互动会影响排序，且不依赖训练数据或新增 ML 依赖。
+- 自动审核、举报、下架/恢复、禁言/封禁、审计和账号通知形成闭环；不记录或使用 IP。
+- 管理员可创建/下载备份；恢复只能通过带 `--confirm` 的停机 CLI；旧的资源流转、失物匹配和管理员保护测试继续通过。
