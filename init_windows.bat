@@ -1,7 +1,8 @@
 @echo off
 setlocal
-chcp 65001 >nul
 cd /d "%~dp0"
+
+if not defined CAMPUS_DATA_DIR set "CAMPUS_DATA_DIR=%cd%\.data"
 
 where py >nul 2>nul
 if %errorlevel% equ 0 (
@@ -9,7 +10,7 @@ if %errorlevel% equ 0 (
 ) else (
   where python >nul 2>nul
   if errorlevel 1 (
-    echo 错误：未找到 Python，请先安装 Python 3.11 或更高版本。
+    echo [ERROR] Python not found. Install Python 3.11+ first.
     exit /b 1
   )
   set "PYTHON=python"
@@ -22,6 +23,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 exit /b 1
+echo.
 ".venv\Scripts\python.exe" -m flask --app app init-db
 if errorlevel 1 exit /b 1
 
@@ -32,5 +34,6 @@ if /i "%~1"=="--demo" (
 )
 if errorlevel 1 exit /b 1
 
-echo 初始化完成。运行 start_windows.bat 启动应用。
+echo.
+echo Initialization complete. Run start_windows.bat to start the app.
 endlocal
