@@ -972,8 +972,8 @@ def create_app(test_config=None) -> Flask:
         q = request.args.get("q", "").strip()
         where, params = ["1=1"], []
         if q:
-            where.append("(name LIKE ? OR username LIKE ? OR student_no LIKE ?)")
-            params.extend([f"%{q}%"] * 3)
+            where.append("(name LIKE ? OR username LIKE ? OR uid LIKE ? OR student_no LIKE ?)")
+            params.extend([f"%{q}%"] * 4)
         db = get_db()
         users = db.execute("SELECT * FROM users WHERE " + " AND ".join(where) + " ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?", (*params, (page - 1) * 20)).fetchall()
         total = db.execute("SELECT COUNT(*) FROM users WHERE " + " AND ".join(where), params).fetchone()[0]

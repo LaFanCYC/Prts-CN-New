@@ -57,8 +57,7 @@ def recommended_posts(db, user_id=None, limit=6):
         "SELECT p.*,u.name author_name,COALESCE(GROUP_CONCAT(t.name,' '),'') tag_names,"
         "(SELECT COUNT(*) FROM content_reactions r WHERE r.target_type='post' AND r.target_id=p.id AND r.kind='like') likes,"
         "(SELECT COUNT(*) FROM content_reactions r WHERE r.target_type='post' AND r.target_id=p.id AND r.kind='favorite') favorites,"
-        "(SELECT COUNT(*) FROM comments c WHERE c.target_type='post' AND c.target_id=p.id AND c.status='published') comment_count,"
-        "(SELECT COUNT(*) FROM reposts rp WHERE rp.post_id=p.id AND rp.status='published') repost_count "
+        "(SELECT COUNT(*) FROM comments c WHERE c.target_type='post' AND c.target_id=p.id AND c.status='published') comment_count "
         "FROM posts p JOIN users u ON u.id=p.author_id "
         "LEFT JOIN post_tags pt ON pt.post_id=p.id LEFT JOIN tags t ON t.id=pt.tag_id "
         "WHERE p.status='published' GROUP BY p.id ORDER BY p.created_at DESC,p.id DESC LIMIT 200"
@@ -72,7 +71,7 @@ def recommended_posts(db, user_id=None, limit=6):
             "JOIN tags t ON t.id=pt.tag_id WHERE e.user_id=? GROUP BY t.name,e.event_type",
             (user_id,),
         ).fetchall():
-            weight = {"view_post": 1, "like": 5, "favorite": 7, "comment": 4, "repost": 6}.get(row["event_type"], 1)
+            weight = {"view_post": 1, "like": 5, "favorite": 7, "comment": 4}.get(row["event_type"], 1)
             interests[row["name"]] = interests.get(row["name"], 0) + row["amount"] * weight
         section = db.execute(
             "SELECT p.section,COUNT(*) amount FROM behavior_events e JOIN posts p ON p.id=e.target_id "
@@ -89,7 +88,7 @@ def recommended_posts(db, user_id=None, limit=6):
         created = datetime.fromisoformat(row["created_at"])
         age_days = max(0.0, (now - created).total_seconds() / 86400)
         freshness = max(0.0, 25.0 * (1 - age_days / 7))
-        heat = min(15.0, row["likes"] * 2 + row["favorites"] * 3 + row["comment_count"] + row["repost_count"] * 2)
+        heat = min(15.0, row["likes"] * 2 + row["favorites"] * 3 + row["comment_count"])
         item = dict(row)
         item["recommendation_score"] = content + freshness + heat
         scored.append(item)
@@ -197,7 +196,7 @@ def _replace_tags(db, post_id, names):
 def _post(db, post_id, include_hidden=False):
     status = "" if include_hidden else " AND p.status='published'"
     return db.execute(
-        "SELECT p.*,u.name author_name,u.username FROM posts p "
+        "SELECT p.*,u.name author_name,u.username,u.uid author_uid FROM posts p "
         "JOIN users u ON u.id=p.author_id WHERE p.id=?" + status,
         (post_id,),
     ).fetchone()
@@ -212,7 +211,7 @@ def create_community_blueprint(login_required, save_image, notify):
             return None
         endpoint = request.endpoint or ""
         restricted = endpoint in {
-            "community.new_post", "community.edit_post", "community.repost",
+            "community.new_post", "community.edit_post",
             "community.add_comment", "community.reply_comment", "community.create_report",
         }
         if not restricted:
@@ -301,11 +300,6 @@ def create_community_blueprint(login_required, save_image, notify):
             "SELECT t.* FROM tags t JOIN post_tags pt ON pt.tag_id=t.id WHERE pt.post_id=? ORDER BY t.name",
             (post_id,),
         ).fetchall()
-        reposts = db.execute(
-            "SELECT r.*,u.name author_name FROM reposts r JOIN users u ON u.id=r.author_id "
-            "WHERE r.post_id=? AND r.status='published' ORDER BY r.created_at DESC",
-            (post_id,),
-        ).fetchall()
         comments = comments_for_target(db, "post", post_id, request.args.get("order", "new"))
         likes = db.execute("SELECT COUNT(*) FROM content_reactions WHERE target_type='post' AND target_id=? AND kind='like'", (post_id,)).fetchone()[0]
         viewer_state = {"liked": False, "favorited": False, "following": False}
@@ -317,7 +311,7 @@ def create_community_blueprint(login_required, save_image, notify):
             record_behavior(db, g.user["id"], "view_post", "post", post_id)
             db.commit()
         return render_template(
-            "community_detail.html", post=post, tags=tags, reposts=reposts,
+            "community_detail.html", post=post, tags=tags,
             comments=comments, target_type="post", target_id=post_id, likes=likes, viewer_state=viewer_state,
         )
 
@@ -427,29 +421,6 @@ def create_community_blueprint(login_required, save_image, notify):
         return render_template(
             "community_following.html", posts=posts, sections=SECTIONS
         )
-
-    @bp.post("/community/<int:post_id>/repost")
-    @login_required
-    def repost(post_id):
-        db = get_db()
-        post = _post(db, post_id)
-        if post is None:
-            abort(404)
-        comment = request.form.get("comment", "").strip()
-        if len(comment) > 300:
-            abort(400, "转发评论不能超过 300 字。")
-        if screen_content(db, comment)[0] != "publish":
-            abort(400, "转发内容需要修改或人工审核。")
-        db.execute(
-            "INSERT INTO reposts(author_id,post_id,comment) VALUES(?,?,?) "
-            "ON CONFLICT(author_id,post_id) DO UPDATE SET comment=excluded.comment,status='published'",
-            (g.user["id"], post_id, comment),
-        )
-        if post["author_id"] != g.user["id"]:
-            notify(db, post["author_id"], f"{g.user['name']} 转发了你的帖子", url_for("community.post_detail", post_id=post_id))
-        record_behavior(db, g.user["id"], "repost", "post", post_id)
-        db.commit()
-        return redirect(url_for("community.post_detail", post_id=post_id))
 
     @bp.post("/comments/<target_type>/<int:target_id>")
     @login_required

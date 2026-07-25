@@ -764,7 +764,6 @@ class CampusAppTest(unittest.TestCase):
             "content_reactions",
             "user_follows",
             "tag_follows",
-            "reposts",
             "reports",
             "moderation_rules",
             "account_restrictions",
@@ -810,7 +809,7 @@ class CampusAppTest(unittest.TestCase):
             403,
         )
 
-    def test_following_feed_and_repost_reference_original_post(self):
+    def test_following_feed_includes_followed_author_posts(self):
         self.register()
         self.login()
         response = self.publish_post()
@@ -826,15 +825,16 @@ class CampusAppTest(unittest.TestCase):
         following = self.client.get("/community/following").get_data(as_text=True)
         self.assertIn("Python 学习小组招募", following)
 
-        self.assertEqual(
-            self.client.post(
-                f"/community/{post_id}/repost", data={"comment": "推荐给正在入门的同学"}
-            ).status_code,
-            302,
-        )
+
+    def test_users_and_posts_receive_public_uids(self):
+        self.register()
+        self.login()
+        self.publish_post()
         with self.db() as db:
-            repost = db.execute("SELECT post_id,comment FROM reposts").fetchone()
-        self.assertEqual(tuple(repost), (post_id, "推荐给正在入门的同学"))
+            user_uid = db.execute("SELECT uid FROM users WHERE username='alice'").fetchone()[0]
+            post_uid = db.execute("SELECT uid FROM posts").fetchone()[0]
+        self.assertRegex(user_uid, r"^U-[0-9a-f]{32}$")
+        self.assertRegex(post_uid, r"^P-[0-9a-f]{32}$")
 
     def test_shared_comments_cover_posts_resources_and_lost_found(self):
         self.register()

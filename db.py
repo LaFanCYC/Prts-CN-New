@@ -36,10 +36,19 @@ def init_db() -> None:
     db = get_db()
     db.executescript(schema)
     columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+    if "uid" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN uid TEXT")
     if "credit_score" not in columns:
         db.execute("ALTER TABLE users ADD COLUMN credit_score INTEGER NOT NULL DEFAULT 100")
     if "credit_recovered_on" not in columns:
         db.execute("ALTER TABLE users ADD COLUMN credit_recovered_on TEXT NOT NULL DEFAULT ''")
+    post_columns = {row["name"] for row in db.execute("PRAGMA table_info(posts)")}
+    if "uid" not in post_columns:
+        db.execute("ALTER TABLE posts ADD COLUMN uid TEXT")
+    db.execute("UPDATE users SET uid='U-' || lower(hex(randomblob(16))) WHERE uid IS NULL OR uid='' ")
+    db.execute("UPDATE posts SET uid='P-' || lower(hex(randomblob(16))) WHERE uid IS NULL OR uid='' ")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_uid ON users(uid)")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS posts_uid ON posts(uid)")
     db.execute("UPDATE users SET credit_score=100 WHERE credit_score IS NULL")
     db.commit()
     if os.name != "nt":

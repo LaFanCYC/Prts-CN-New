@@ -2,6 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -16,6 +17,13 @@ CREATE TABLE IF NOT EXISTS users (
     credit_recovered_on TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TRIGGER IF NOT EXISTS users_assign_uid
+AFTER INSERT ON users
+WHEN NEW.uid IS NULL OR NEW.uid = ''
+BEGIN
+    UPDATE users SET uid = 'U-' || lower(hex(randomblob(16))) WHERE id = NEW.id;
+END;
 
 CREATE TABLE IF NOT EXISTS resources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +100,7 @@ CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, is_read,
 
 CREATE TABLE IF NOT EXISTS posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT UNIQUE,
     author_id INTEGER NOT NULL REFERENCES users(id),
     section TEXT NOT NULL CHECK (section IN ('resource', 'lost_found', 'study', 'campus', 'feedback')),
     title TEXT NOT NULL,
@@ -102,6 +111,13 @@ CREATE TABLE IF NOT EXISTS posts (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TRIGGER IF NOT EXISTS posts_assign_uid
+AFTER INSERT ON posts
+WHEN NEW.uid IS NULL OR NEW.uid = ''
+BEGIN
+    UPDATE posts SET uid = 'P-' || lower(hex(randomblob(16))) WHERE id = NEW.id;
+END;
 
 CREATE TABLE IF NOT EXISTS tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,16 +165,6 @@ CREATE TABLE IF NOT EXISTS tag_follows (
     tag_id INTEGER NOT NULL REFERENCES tags(id),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, tag_id)
-);
-
-CREATE TABLE IF NOT EXISTS reposts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    author_id INTEGER NOT NULL REFERENCES users(id),
-    post_id INTEGER NOT NULL REFERENCES posts(id),
-    comment TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published', 'withdrawn')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (author_id, post_id)
 );
 
 CREATE TABLE IF NOT EXISTS reports (
@@ -211,7 +217,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE TABLE IF NOT EXISTS behavior_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    event_type TEXT NOT NULL CHECK (event_type IN ('view_post', 'view_section', 'like', 'favorite', 'comment', 'repost')),
+    event_type TEXT NOT NULL CHECK (event_type IN ('view_post', 'view_section', 'like', 'favorite', 'comment')),
     target_type TEXT NOT NULL,
     target_id INTEGER NOT NULL,
     event_date TEXT NOT NULL DEFAULT (DATE('now')),
@@ -268,7 +274,6 @@ CREATE TABLE IF NOT EXISTS credit_appeals (
 CREATE INDEX IF NOT EXISTS posts_feed ON posts(status, section, created_at);
 CREATE INDEX IF NOT EXISTS comments_target ON comments(target_type, target_id, status, created_at);
 CREATE INDEX IF NOT EXISTS reactions_target ON content_reactions(target_type, target_id, kind);
-CREATE INDEX IF NOT EXISTS reposts_post ON reposts(post_id, status, created_at);
 CREATE INDEX IF NOT EXISTS reports_queue ON reports(status, created_at);
 CREATE INDEX IF NOT EXISTS restrictions_user ON account_restrictions(user_id, is_active, ends_at);
 CREATE INDEX IF NOT EXISTS audit_recent ON audit_logs(created_at);
