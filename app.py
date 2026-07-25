@@ -60,14 +60,15 @@ DEFAULT_AI_SYSTEM_PROMPT = (
 
 def _secret_key(data_dir: Path) -> str:
     key_file = data_dir / "secret.key"
-    if key_file.exists():
-        if os.name != "nt":
-            key_file.chmod(0o600)
+    try:
         return key_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
     key = secrets.token_hex(32)
-    key_file.write_text(key, encoding="utf-8")
-    if os.name != "nt":
-        key_file.chmod(0o600)
+    try:
+        key_file.write_text(key, encoding="utf-8")
+    except OSError:
+        pass
     return key
 
 
@@ -78,7 +79,10 @@ def create_app(test_config=None) -> Flask:
         or os.environ.get("CAMPUS_DATA_DIR")
         or default_data_dir()
     )
-    data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        pass
     if os.name != "nt":
         data_dir.chmod(0o700)
     upload_dir = Path((test_config or {}).get("UPLOAD_FOLDER", data_dir / "uploads"))
