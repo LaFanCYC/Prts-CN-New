@@ -33,7 +33,15 @@ def close_db(_error=None) -> None:
 
 def init_db() -> None:
     schema = Path(current_app.root_path, "schema.sql").read_text(encoding="utf-8")
-    get_db().executescript(schema)
+    db = get_db()
+    db.executescript(schema)
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+    if "credit_score" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN credit_score INTEGER NOT NULL DEFAULT 100")
+    if "credit_recovered_on" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN credit_recovered_on TEXT NOT NULL DEFAULT ''")
+    db.execute("UPDATE users SET credit_score=100 WHERE credit_score IS NULL")
+    db.commit()
     if os.name != "nt":
         Path(current_app.config["DATABASE"]).chmod(0o600)
 

@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
 {% block content %}
-<header class="compact-intro"><div><p class="eyebrow blue">校园智享</p><h1>资源流转与校园互助</h1></div><div class="actions"><a class="button" href="{{ url_for('resources') }}">浏览资源</a><a class="secondary button" href="{{ url_for('community.list_posts') }}">进入社区</a></div></header>
 <div class="home-grid">
   <section><div class="section-head"><h2>推荐帖子</h2><a href="{{ url_for('community.list_posts') }}">更多</a></div><div class="list">{% for post in posts %}<article class="card"><span class="badge">{{ post['section'] }}</span><h3><a href="{{ url_for('community.post_detail', post_id=post['id']) }}">{{ post['title'] }}</a></h3><p>{{ post['body']|truncate(70) }}</p><small>{{ post['author_name'] }}</small></article>{% else %}<div class="empty">暂无帖子</div>{% endfor %}</div></section>
   <section><div class="section-head"><h2>最新资源</h2><a href="{{ url_for('resources') }}">更多</a></div><div class="list">{% for resource in resources %}<article class="card"><span class="badge">{{ resource['category'] }}</span><h3><a href="{{ url_for('resource_detail', resource_id=resource['id']) }}">{{ resource['name'] }}</a></h3><p>{{ resource['description']|truncate(70) }}</p><small>{{ resource['owner_name'] }}</small></article>{% else %}<div class="empty">暂无资源</div>{% endfor %}</div></section>

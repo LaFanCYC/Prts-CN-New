@@ -27,6 +27,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from community import audit, comments_for_target, create_community_blueprint, recommended_posts
+from credit import EVENT_LABELS, TIERS, credit_tier, permission_for_score, priority_rank, record_event, score_chart, settle_credit
 from db import create_backup, default_data_dir, get_db, init_app as init_db_app, init_db
 
 
@@ -109,6 +110,8 @@ def create_app(test_config=None) -> Flask:
             session.clear()
             g.user = None
         if g.user is not None:
+            _settle_credit(g.user["id"])
+            g.user = get_db().execute("SELECT * FROM users WHERE id=?", (g.user["id"],)).fetchone()
             _check_overdue(g.user["id"])
             if g.user["must_change_password"] and request.endpoint not in {
                 "profile", "logout", "static"
@@ -288,9 +291,9 @@ def create_app(test_config=None) -> Flask:
             contact = request.form.get("contact", "").strip()
             password = request.form.get("new_password", "")
             if not name or not grade or not class_name or len(contact) > 100:
-                return render_template("profile.html", error="资料不完整或联系方式超过 100 字。"), 400
+                return render_template("profile.html", error="资料不完整或联系方式超过 100 字。", **_profile_context()), 400
             if password and (len(password) < 8 or password != request.form.get("password_confirm")):
-                return render_template("profile.html", error="新密码至少 8 位且两次输入必须一致。"), 400
+                return render_template("profile.html", error="新密码至少 8 位且两次输入必须一致。", **_profile_context()), 400
             db = get_db()
             db.execute(
                 "UPDATE users SET name=?, grade=?, class_name=?, contact=? WHERE id=?",
@@ -304,7 +307,36 @@ def create_app(test_config=None) -> Flask:
             db.commit()
             flash("个人资料已更新。", "success")
             return redirect(url_for("profile"))
-        return render_template("profile.html")
+        return render_template("profile.html", **_profile_context())
+
+    @app.get("/credit/chart")
+    @login_required
+    def credit_chart_api():
+        _settle_credit(g.user["id"])
+        return jsonify(score_chart(get_db(), g.user["id"], request.args.get("days", 30, type=int)))
+
+    @app.post("/credit/appeals")
+    @login_required
+    def credit_appeal_create():
+        event_id = request.form.get("event_id", type=int)
+        reason = request.form.get("reason", "").strip()
+        event = get_db().execute(
+            "SELECT * FROM credit_events WHERE id=? AND user_id=? AND delta<0 AND created_at>=datetime('now','-30 days')",
+            (event_id, g.user["id"]),
+        ).fetchone()
+        if event is None or not reason or len(reason) > 500:
+            abort(400, "只能对 30 天内的扣分记录提交一次有效申诉。")
+        try:
+            get_db().execute("INSERT INTO credit_appeals(event_id,user_id,reason) VALUES(?,?,?)", (event_id, g.user["id"], reason))
+            get_db().commit()
+        except sqlite3.IntegrityError:
+            abort(409, "该扣分记录已有申诉。")
+        flash("申诉已提交，管理员会在后台处理。", "success")
+        return redirect(url_for("profile", tab="credit"))
+
+    @app.get("/credit/help")
+    def credit_help():
+        return render_template("credit_help.html", tiers=TIERS, event_labels=EVENT_LABELS)
 
     @app.route("/resources")
     def resources():
@@ -347,6 +379,8 @@ def create_app(test_config=None) -> Flask:
                 "resource_form.html", categories=RESOURCE_CATEGORIES,
                 conditions=CONDITION_LEVELS, resource=None,
             )
+        if not permission_for_score(g.user["credit_score"])["can_publish"]:
+            abort(403, "信用分低于 40，暂不能发布新内容。")
         data, error = _resource_form_data(request.form)
         image_name = None
         if not error:
@@ -388,8 +422,12 @@ def create_app(test_config=None) -> Flask:
             ).fetchone()
             if g.user["id"] == resource["owner_id"]:
                 owner_applications = get_db().execute(
-                    "SELECT a.*,u.name applicant_name,u.contact applicant_contact FROM applications a "
-                    "JOIN users u ON u.id=a.applicant_id WHERE a.resource_id=? ORDER BY a.applied_at DESC",
+                    "SELECT a.*,u.name applicant_name,u.contact applicant_contact,u.credit_score, "
+                    "(SELECT GROUP_CONCAT(event_type,'、') FROM credit_events ce WHERE ce.user_id=u.id "
+                    "AND ce.delta<0 AND ce.created_at>=datetime('now','-90 days')) recent_deductions "
+                    "FROM applications a JOIN users u ON u.id=a.applicant_id WHERE a.resource_id=? "
+                    "ORDER BY CASE WHEN u.credit_score>=100 THEN 0 WHEN u.credit_score>=80 THEN 1 "
+                    "WHEN u.credit_score>=60 THEN 2 ELSE 3 END,a.applied_at",
                     (resource_id,),
                 ).fetchall()
         return render_template(
@@ -461,7 +499,7 @@ def create_app(test_config=None) -> Flask:
         ).fetchone()
         if has_history or is_admin:
             affected = db.execute(
-                "SELECT applicant_id FROM applications WHERE resource_id=? AND status IN ('pending','borrowed','return_pending','in_service','completion_pending')",
+                "SELECT applicant_id,status,id FROM applications WHERE resource_id=? AND status IN ('pending','borrowed','return_pending','in_service','completion_pending')",
                 (resource_id,),
             ).fetchall()
             db.execute("UPDATE resources SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=?", (resource_id,))
@@ -469,8 +507,20 @@ def create_app(test_config=None) -> Flask:
                 "UPDATE applications SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE resource_id=? AND status IN ('pending','borrowed','return_pending','in_service','completion_pending')",
                 (resource_id,),
             )
+            fault = request.form.get("fault", "neutral")
+            reason = request.form.get("reason", "").strip() or "管理员终止流转"
+            if is_admin and fault not in {"neutral", "borrower", "applicant", "provider"}:
+                abort(400, "归责类型无效。")
             for applicant in affected:
+                if is_admin and resource["transfer_mode"] == "borrow" and fault == "borrower" and applicant["status"] in {"borrowed", "return_pending"}:
+                    record_event(db, applicant["applicant_id"], -15, "borrower_termination", reason, reference_type="application", reference_id=applicant["id"], actor_id=g.user["id"], event_key=f"termination:{applicant['id']}:borrower")
+                if is_admin and resource["transfer_mode"] in SKILL_MODES and applicant["status"] in {"in_service", "completion_pending"}:
+                    target = applicant["applicant_id"] if fault == "applicant" else resource["owner_id"] if fault == "provider" else None
+                    if target:
+                        record_event(db, target, -10, "skill_no_show", reason, reference_type="application", reference_id=applicant["id"], actor_id=g.user["id"], event_key=f"termination:{applicant['id']}:{fault}")
                 _notify(db, applicant["applicant_id"], f"“{resource['name']}”已下架，相关流转已结束", url_for("applications"))
+            if is_admin:
+                audit(db, g.user["id"], "application_terminate", "resource", resource_id, f"{fault}：{reason}")
         else:
             db.execute("DELETE FROM resources WHERE id=?", (resource_id,))
         db.commit()
@@ -487,6 +537,16 @@ def create_app(test_config=None) -> Flask:
     @login_required
     def application_create(resource_id):
         db = get_db()
+        _settle_credit(g.user["id"])
+        user = db.execute("SELECT credit_score FROM users WHERE id=?", (g.user["id"],)).fetchone()
+        permissions = permission_for_score(user["credit_score"])
+        if not permissions["can_apply"]:
+            abort(403, "当前信用分低于 60，暂不能提交新申请。")
+        if permissions["limited"]:
+            pending = db.execute("SELECT COUNT(*) FROM applications WHERE applicant_id=? AND status='pending'", (g.user["id"],)).fetchone()[0]
+            active = db.execute("SELECT COUNT(*) FROM applications WHERE applicant_id=? AND status IN ('borrowed','return_pending','in_service','completion_pending')", (g.user["id"],)).fetchone()[0]
+            if pending >= 1 or active >= 1:
+                abort(409, "信用分 60–79 时，最多保留 1 条待审批申请和 1 条进行中流转。")
         resource = db.execute("SELECT * FROM resources WHERE id=?", (resource_id,)).fetchone()
         if resource is None or resource["status"] == "withdrawn":
             abort(404)
@@ -531,14 +591,14 @@ def create_app(test_config=None) -> Flask:
             "WHERE a.applicant_id=? ORDER BY a.applied_at DESC", (g.user["id"],)
         ).fetchall()
         received_sql = (
-            "SELECT a.*,r.name resource_name,r.transfer_mode,u.name applicant_name,u.contact applicant_contact "
+            "SELECT a.*,r.name resource_name,r.transfer_mode,u.name applicant_name,u.contact applicant_contact,u.credit_score "
             "FROM applications a JOIN resources r ON r.id=a.resource_id JOIN users u ON u.id=a.applicant_id "
         )
         if g.user["role"] == "admin":
             received = db.execute(received_sql + "ORDER BY a.applied_at DESC").fetchall()
         else:
             received = db.execute(
-                received_sql + "WHERE r.owner_id=? ORDER BY a.applied_at DESC", (g.user["id"],)
+                received_sql + "WHERE r.owner_id=? ORDER BY CASE WHEN u.credit_score>=100 THEN 0 WHEN u.credit_score>=80 THEN 1 WHEN u.credit_score>=60 THEN 2 ELSE 3 END,a.applied_at", (g.user["id"],)
             ).fetchall()
         return render_template("applications.html", sent=sent, received=received)
 
@@ -645,6 +705,8 @@ def create_app(test_config=None) -> Flask:
             abort(409)
         db.execute("UPDATE applications SET status='returned',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?", (application_id,))
         db.execute("UPDATE resources SET status='available',updated_at=CURRENT_TIMESTAMP WHERE id=?", (item["resource_id"],))
+        if item["expected_return_date"] and date.fromisoformat(item["action_at"][:10]) <= date.fromisoformat(item["expected_return_date"]):
+            record_event(db, item["applicant_id"], 2, "on_time_return", "按时归还资源", reference_type="application", reference_id=application_id, event_key=f"return:{application_id}")
         _notify(db, item["applicant_id"], f"“{item['resource_name']}”归还已确认", url_for("applications"))
         db.commit()
         return redirect(url_for("applications"))
@@ -674,6 +736,8 @@ def create_app(test_config=None) -> Flask:
             abort(409)
         db.execute("UPDATE applications SET status='completed',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?", (application_id,))
         db.execute("UPDATE resources SET status='available',updated_at=CURRENT_TIMESTAMP WHERE id=?", (item["resource_id"],))
+        record_event(db, item["applicant_id"], 1, "skill_completed", "技能服务确认完成", reference_type="application", reference_id=application_id, event_key=f"skill-complete:applicant:{application_id}")
+        record_event(db, item["owner_id"], 1, "skill_completed", "技能服务确认完成", reference_type="application", reference_id=application_id, event_key=f"skill-complete:owner:{application_id}")
         _notify(db, item["owner_id"], f"“{item['resource_name']}”服务完成已确认", url_for("applications"))
         db.commit()
         return redirect(url_for("applications"))
@@ -885,6 +949,11 @@ def create_app(test_config=None) -> Flask:
             moderation_rules=db.execute(
                 "SELECT * FROM moderation_rules ORDER BY is_active DESC,severity,pattern"
             ).fetchall(),
+            credit_appeals=db.execute(
+                "SELECT ca.*,ce.delta,ce.reason event_reason,u.name user_name FROM credit_appeals ca "
+                "JOIN credit_events ce ON ce.id=ca.event_id JOIN users u ON u.id=ca.user_id "
+                "WHERE ca.status='pending' ORDER BY ca.created_at"
+            ).fetchall(),
         )
 
     @app.route("/api/admin/stats")
@@ -962,6 +1031,51 @@ def create_app(test_config=None) -> Flask:
                 abort(409, "用户名或学号已存在。")
             raise
         flash("用户资料已更正。", "success")
+        return redirect(url_for("admin"))
+
+    @app.post("/admin/users/<int:user_id>/credit")
+    @admin_required
+    def admin_credit_adjust(user_id):
+        try:
+            delta = int(request.form.get("delta", ""))
+        except ValueError:
+            delta = 0
+        reason = request.form.get("reason", "").strip()
+        if not -20 <= delta <= 20 or not delta or not reason or len(reason) > 300:
+            abort(400, "调整范围为 -20 到 +20，且必须填写原因。")
+        db = get_db()
+        if db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone() is None:
+            abort(404)
+        outcome = record_event(db, user_id, delta, "admin_adjustment", reason, actor_id=g.user["id"])
+        audit(db, g.user["id"], "credit_adjust", "user", user_id, f"{outcome['delta']:+d}：{reason}")
+        if outcome["delta"] < 0:
+            _notify(db, user_id, f"信用分 {outcome['delta']}：{reason}，可在 30 天内申诉。", url_for("profile", tab="credit"))
+        db.commit()
+        return redirect(url_for("admin"))
+
+    @app.post("/admin/credit-appeals/<int:appeal_id>/<action>")
+    @admin_required
+    def admin_credit_appeal(appeal_id, action):
+        if action not in {"maintain", "revoke"}:
+            abort(404)
+        comment = request.form.get("comment", "").strip()
+        if not comment or len(comment) > 500:
+            abort(400, "处理说明必填且不能超过 500 字。")
+        db = get_db()
+        appeal = db.execute(
+            "SELECT ca.*,ce.delta,ce.reason event_reason FROM credit_appeals ca JOIN credit_events ce ON ce.id=ca.event_id "
+            "WHERE ca.id=? AND ca.status='pending'", (appeal_id,)
+        ).fetchone()
+        if appeal is None:
+            abort(404)
+        status = "rejected" if action == "maintain" else "upheld"
+        db.execute("UPDATE credit_appeals SET status=?,admin_comment=?,handled_by=?,handled_at=CURRENT_TIMESTAMP WHERE id=?", (status, comment, g.user["id"], appeal_id))
+        if action == "revoke":
+            record_event(db, appeal["user_id"], -appeal["delta"], "appeal_reversal", "申诉撤销补偿：" + comment,
+                         reference_type="credit_event", reference_id=appeal["event_id"], actor_id=g.user["id"], event_key=f"appeal-reversal:{appeal['event_id']}")
+        audit(db, g.user["id"], f"credit_appeal_{action}", "credit_appeal", appeal_id, comment)
+        _notify(db, appeal["user_id"], f"信用申诉已{'撤销原扣分' if action == 'revoke' else '维持原处理'}：{comment}", url_for("profile", tab="credit"))
+        db.commit()
         return redirect(url_for("admin"))
 
     @app.post("/admin/reports/<int:report_id>/<action>")
@@ -1171,6 +1285,45 @@ def _notify(db, user_id, message, target_url, dedupe_key=None):
         "INSERT OR IGNORE INTO notifications(user_id,message,target_url,dedupe_key) VALUES(?,?,?,?)",
         (user_id, message, target_url, dedupe_key),
     )
+
+
+def _settle_credit(user_id):
+    db = get_db()
+    before = db.execute("SELECT credit_score FROM users WHERE id=?", (user_id,)).fetchone()
+    for outcome in settle_credit(db, user_id):
+        if outcome["delta"] < 0:
+            _notify(
+                db, user_id, f"信用分 {outcome['delta']}：{EVENT_LABELS[outcome.get('event_type', 'overdue_return')] if outcome.get('event_type') else '逾期未归还'}，可在 30 天内申诉。",
+                url_for("profile", tab="credit"), f"credit:{outcome['id']}",
+            )
+    after = db.execute("SELECT credit_score FROM users WHERE id=?", (user_id,)).fetchone()
+    if before and after and credit_tier(before["credit_score"])["name"] != credit_tier(after["credit_score"])["name"]:
+        _notify(db, user_id, f"信用档位已变为“{credit_tier(after['credit_score'])['name']}”。", url_for("profile", tab="credit"))
+    db.commit()
+
+
+def _profile_context():
+    db = get_db()
+    user_id = g.user["id"]
+    events = db.execute(
+        "SELECT e.*,a.id appeal_id,a.status appeal_status FROM credit_events e "
+        "LEFT JOIN credit_appeals a ON a.event_id=e.id WHERE e.user_id=? ORDER BY e.created_at DESC,e.id DESC LIMIT 100",
+        (user_id,),
+    ).fetchall()
+    publications = db.execute(
+        "SELECT 'resource' kind,id,name title,status,created_at FROM resources WHERE owner_id=? "
+        "UNION ALL SELECT 'lost_found',id,title,status,created_at FROM lost_found WHERE user_id=? ORDER BY created_at DESC LIMIT 50",
+        (user_id, user_id),
+    ).fetchall()
+    flow_counts = db.execute(
+        "SELECT status,COUNT(*) total FROM applications WHERE applicant_id=? GROUP BY status", (user_id,)
+    ).fetchall()
+    return {
+        "profile_tab": request.args.get("tab", "overview"),
+        "credit": {"score": g.user["credit_score"], "tier": credit_tier(g.user["credit_score"]), "permissions": permission_for_score(g.user["credit_score"])},
+        "credit_events": events, "event_labels": EVENT_LABELS, "publications": publications,
+        "flow_counts": {row["status"]: row["total"] for row in flow_counts},
+    }
 
 
 def _check_overdue(user_id):

@@ -8,7 +8,7 @@ if [[ ! -x .venv/bin/python ]]; then
   exit 1
 fi
 
-host="${CAMPUS_HOST:-127.0.0.1}"
+host="${CAMPUS_HOST:-127.0.0.0}"
 port="${CAMPUS_PORT:-5000}"
 url="http://${host}:${port}"
 

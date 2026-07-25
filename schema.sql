@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('student', 'admin')),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1)),
+    credit_score INTEGER NOT NULL DEFAULT 100 CHECK (credit_score BETWEEN 0 AND 120),
+    credit_recovered_on TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -226,6 +228,32 @@ CREATE TABLE IF NOT EXISTS backup_records (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS credit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    delta INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL CHECK (balance_after BETWEEN 0 AND 120),
+    event_type TEXT NOT NULL,
+    reference_type TEXT NOT NULL DEFAULT '',
+    reference_id INTEGER,
+    reason TEXT NOT NULL,
+    actor_id INTEGER REFERENCES users(id),
+    event_key TEXT UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS credit_appeals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL UNIQUE REFERENCES credit_events(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'upheld', 'rejected')),
+    admin_comment TEXT NOT NULL DEFAULT '',
+    handled_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    handled_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS posts_feed ON posts(status, section, created_at);
 CREATE INDEX IF NOT EXISTS comments_target ON comments(target_type, target_id, status, created_at);
 CREATE INDEX IF NOT EXISTS reactions_target ON content_reactions(target_type, target_id, kind);
@@ -234,3 +262,5 @@ CREATE INDEX IF NOT EXISTS reports_queue ON reports(status, created_at);
 CREATE INDEX IF NOT EXISTS restrictions_user ON account_restrictions(user_id, is_active, ends_at);
 CREATE INDEX IF NOT EXISTS audit_recent ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS behavior_user ON behavior_events(user_id, created_at);
+CREATE INDEX IF NOT EXISTS credit_events_user ON credit_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS credit_appeals_status ON credit_appeals(status, created_at);

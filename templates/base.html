@@ -20,11 +20,8 @@
       {% if g.user %}
         <a href="{{ url_for('applications') }}">流转记录</a>
         <a href="{{ url_for('notifications') }}">通知{% if unread_count %}<span class="count">{{ unread_count }}</span>{% endif %}</a>
-        <a href="{{ url_for('profile') }}">个人中心</a>
+        <details class="account-menu"><summary>个人中心</summary><div class="account-popover"><a href="{{ url_for('profile') }}">概览与资料</a><a href="{{ url_for('profile', tab='publications') }}">我的发布</a><a href="{{ url_for('applications') }}">我的流转</a><a href="{{ url_for('profile', tab='credit') }}">信用中心</a><a href="{{ url_for('notifications') }}">通知</a><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link-button">退出登录</button></form></div></details>
         {% if g.user['role'] == 'admin' %}<a href="{{ url_for('admin') }}">管理后台</a>{% endif %}
-        <form class="inline" method="post" action="{{ url_for('logout') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link-button">退出</button>
-        </form>
       {% else %}
         <a href="{{ url_for('login') }}">登录</a><a href="{{ url_for('register') }}">注册</a>
       {% endif %}

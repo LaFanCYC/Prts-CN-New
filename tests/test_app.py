@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from app import create_app, match_score
+from credit import credit_tier, permission_for_score
 
 
 class CampusAppTest(unittest.TestCase):
@@ -110,6 +111,15 @@ class CampusAppTest(unittest.TestCase):
         response = self.register(username="alice2", student_no="S001")
         self.assertEqual(response.status_code, 400)
         self.assertIn("学号已存在", response.get_data(as_text=True))
+
+    def test_credit_tiers_and_permissions_have_fixed_boundaries(self):
+        self.assertEqual(credit_tier(100)["name"], "优先")
+        self.assertEqual(credit_tier(80)["name"], "正常")
+        self.assertEqual(credit_tier(60)["name"], "靠后")
+        self.assertEqual(credit_tier(59)["name"], "受限")
+        self.assertTrue(permission_for_score(60)["can_apply"])
+        self.assertFalse(permission_for_score(59)["can_apply"])
+        self.assertFalse(permission_for_score(39)["can_publish"])
 
     def test_disabled_user_cannot_login_and_student_cannot_open_admin(self):
         self.register()
@@ -267,6 +277,12 @@ class CampusAppTest(unittest.TestCase):
             self.assertEqual(
                 db.execute("SELECT status FROM applications WHERE id=?", (bob_application,)).fetchone()[0],
                 "returned",
+            )
+            self.assertEqual(
+                db.execute("SELECT credit_score FROM users WHERE username='bob'").fetchone()[0], 102,
+            )
+            self.assertEqual(
+                db.execute("SELECT delta FROM credit_events WHERE user_id=(SELECT id FROM users WHERE username='bob')").fetchone()[0], 2,
             )
             self.assertEqual(
                 db.execute("SELECT status FROM resources WHERE id=?", (resource_id,)).fetchone()[0],

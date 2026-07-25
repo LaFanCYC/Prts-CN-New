@@ -1,17 +1,15 @@
 {% extends 'base.html' %}
 {% block title %}个人中心 · 校园智享{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>个人中心</h1>
-  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
-  <form method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="form-grid"><label>用户名<input value="{{ g.user['username'] }}" disabled></label><label>学号<input value="{{ g.user['student_no'] }}" disabled></label></div>
-    <div class="form-grid"><label>姓名<input name="name" maxlength="50" value="{{ g.user['name'] }}" required></label><label>联系方式<input name="contact" maxlength="100" value="{{ g.user['contact'] }}"></label></div>
-    <div class="form-grid"><label>年级<input name="grade" value="{{ g.user['grade'] }}" required></label><label>班级<input name="class_name" value="{{ g.user['class_name'] }}" required></label></div>
-    <h2>修改密码（可选）</h2>
-    <div class="form-grid"><label>新密码<input type="password" minlength="8" name="new_password"></label><label>确认新密码<input type="password" minlength="8" name="password_confirm"></label></div>
-    <button class="primary">保存</button>
-  </form>
-</section>
+<section class="panel"><h1>个人中心</h1><nav class="tabs"><a href="{{ url_for('profile') }}">概览与资料</a><a href="{{ url_for('profile', tab='publications') }}">我的发布</a><a href="{{ url_for('applications') }}">我的流转</a><a href="{{ url_for('profile', tab='credit') }}">信用中心</a></nav></section>
+{% if profile_tab == 'credit' %}
+<section class="panel"><div class="section-head"><div><h2>信用中心</h2><p>当前信用分 <strong class="credit-score">{{ credit.score }}</strong> · {{ credit.tier.name }}</p></div><a class="button secondary" href="{{ url_for('credit_help') }}">信用分帮助</a></div><p class="muted">{{ credit.tier.description }}。正向流转奖励每天最多 +2、每周最多 +6；低于 100 且没有逾期借用时每天恢复 +1。</p><div class="chart-actions"><button type="button" class="secondary" data-credit-days="30">30 天</button><button type="button" class="secondary" data-credit-days="90">90 天</button></div><svg id="credit-chart" class="credit-chart" viewBox="0 0 600 180" role="img" aria-label="信用分走势"></svg></section>
+<section class="panel"><h2>信用记录</h2><div class="list">{% for event in credit_events %}<article class="credit-event"><strong>{{ event_labels.get(event.event_type, event.event_type) }}</strong><span class="{{ 'danger-text' if event.delta < 0 else 'success-text' }}">{{ '+' if event.delta > 0 else '' }}{{ event.delta }}</span><small>{{ event.created_at }} · 结余 {{ event.balance_after }}</small><p>{{ event.reason }}</p>{% if event.delta < 0 and not event.appeal_id %}<form method="post" action="{{ url_for('credit_appeal_create') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="event_id" value="{{ event.id }}"><label>申诉说明<textarea name="reason" maxlength="500" required></textarea></label><button class="secondary">提交申诉</button></form>{% elif event.appeal_id %}<small>申诉状态：{{ {'pending':'待处理','upheld':'已撤销','rejected':'已维持'}[event.appeal_status] }}</small>{% endif %}</article>{% else %}<p class="empty">暂无信用记录。</p>{% endfor %}</div></section>
+<script>document.querySelectorAll('[data-credit-days]').forEach(b=>b.onclick=async()=>{const d=b.dataset.creditDays,rows=await fetch('{{ url_for('credit_chart_api') }}?days='+d).then(r=>r.json()),svg=document.querySelector('#credit-chart'),min=Math.min(...rows.map(x=>x.score),0),max=Math.max(...rows.map(x=>x.score),120),p=rows.map((x,i)=>`${i/(rows.length-1)*580+10},${165-(x.score-min)/(max-min||1)*140}`).join(' ');svg.innerHTML=`<polyline fill="none" stroke="#1677ff" stroke-width="3" points="${p}"/><text x="10" y="178" fill="#65758b">${rows[0].date}</text><text x="500" y="178" fill="#65758b">${rows.at(-1).date}</text>`});document.querySelector('[data-credit-days="30"]').click()</script>
+{% elif profile_tab == 'publications' %}
+<section class="panel"><h2>我的发布</h2><div class="list">{% for item in publications %}<p><span class="badge">{{ '资源' if item.kind == 'resource' else '失物招领' }}</span> {{ item.title }} · {{ item.status }} · {{ item.created_at }}</p>{% else %}<p class="empty">暂无发布。</p>{% endfor %}</div></section>
+{% else %}
+<section class="panel"><h2>信用概览</h2><p>当前信用分 <strong class="credit-score">{{ credit.score }}</strong> · {{ credit.tier.name }}</p><p>{{ credit.tier.description }}。<a href="{{ url_for('profile', tab='credit') }}">查看信用记录与折线图</a></p><p class="muted">我的流转：待审批 {{ flow_counts.get('pending', 0) }} · 进行中 {{ flow_counts.get('borrowed', 0) + flow_counts.get('in_service', 0) }}</p></section>
+<section class="panel"><h2>个人资料</h2>{% if error %}<div class="flash error">{{ error }}</div>{% endif %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="form-grid"><label>用户名<input value="{{ g.user['username'] }}" disabled></label><label>学号<input value="{{ g.user['student_no'] }}" disabled></label></div><div class="form-grid"><label>姓名<input name="name" maxlength="50" value="{{ g.user['name'] }}" required></label><label>联系方式<input name="contact" maxlength="100" value="{{ g.user['contact'] }}"></label></div><div class="form-grid"><label>年级<input name="grade" value="{{ g.user['grade'] }}" required></label><label>班级<input name="class_name" value="{{ g.user['class_name'] }}" required></label></div><h2>修改密码（可选）</h2><div class="form-grid"><label>新密码<input type="password" minlength="8" name="new_password"></label><label>确认新密码<input type="password" minlength="8" name="password_confirm"></label></div><button class="primary">保存</button></form></section>
+{% endif %}
 {% endblock %}
