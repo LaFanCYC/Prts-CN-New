@@ -12,8 +12,11 @@ if not defined CAMPUS_HOST set "CAMPUS_HOST=127.0.0.1"
 if not defined CAMPUS_PORT set "CAMPUS_PORT=5000"
 set "CAMPUS_URL=http://%CAMPUS_HOST%:%CAMPUS_PORT%"
 
+echo [%date% %time%] app.py hash: 
+".venv\Scripts\python.exe" -c "import hashlib; print(hashlib.sha256(open('app.py','rb').read()).hexdigest()[:12])"
+echo.
 echo CampusSmartFlow starting at %CAMPUS_URL%
-start "" "%CAMPUS_URL%"
-".venv\Scripts\python.exe" -m waitress --host=%CAMPUS_HOST% --port=%CAMPUS_PORT% --call app:create_app
+start "" "%CAMPUS_URL%" 2>nul
+".venv\Scripts\python.exe" -B -m waitress --host=%CAMPUS_HOST% --port=%CAMPUS_PORT% --call app:create_app
 if errorlevel 1 pause
 endlocal
