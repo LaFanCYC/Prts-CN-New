@@ -575,6 +575,13 @@ class CampusAppTest(unittest.TestCase):
         self.assertEqual(self.client.post("/admin/resources/bulk-withdraw", data={"resource_ids": str(resource_id)}).status_code, 302)
         with self.db() as db:
             self.assertEqual(db.execute("SELECT status FROM resources WHERE id=?", (resource_id,)).fetchone()[0], "withdrawn")
+            item_id = db.execute(
+                "INSERT INTO lost_found(user_id,kind,title,description,occurred_on,location,keywords) VALUES(1,'lost','待审核失物','描述','2026-01-01','图书馆','卡片')"
+            ).lastrowid
+            db.commit()
+        self.assertEqual(self.client.post(f"/admin/lost-found/{item_id}/withdraw").status_code, 302)
+        with self.db() as db:
+            self.assertEqual(db.execute("SELECT status FROM lost_found WHERE id=?", (item_id,)).fetchone()[0], "withdrawn")
 
     def test_student_cannot_call_admin_write_routes(self):
         self.register()

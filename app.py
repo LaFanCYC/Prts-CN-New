@@ -544,35 +544,7 @@ def create_app(test_config=None) -> Flask:
             abort(403)
         if resource["status"] in {"in_use", "in_service"} and not is_admin:
             abort(409, "进行中的资源不能下架。")
-        has_history = db.execute(
-            "SELECT 1 FROM applications WHERE resource_id=?", (resource_id,)
-        ).fetchone()
-        if has_history or is_admin:
-            affected = db.execute(
-                "SELECT applicant_id,status,id FROM applications WHERE resource_id=? AND status IN ('pending','borrowed','return_pending','in_service','completion_pending')",
-                (resource_id,),
-            ).fetchall()
-            db.execute("UPDATE resources SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=?", (resource_id,))
-            db.execute(
-                "UPDATE applications SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE resource_id=? AND status IN ('pending','borrowed','return_pending','in_service','completion_pending')",
-                (resource_id,),
-            )
-            fault = request.form.get("fault", "neutral")
-            reason = request.form.get("reason", "").strip() or "管理员终止流转"
-            if is_admin and fault not in {"neutral", "borrower", "applicant", "provider"}:
-                abort(400, "归责类型无效。")
-            for applicant in affected:
-                if is_admin and resource["transfer_mode"] == "borrow" and fault == "borrower" and applicant["status"] in {"borrowed", "return_pending"}:
-                    record_event(db, applicant["applicant_id"], -15, "borrower_termination", reason, reference_type="application", reference_id=applicant["id"], actor_id=g.user["id"], event_key=f"termination:{applicant['id']}:borrower")
-                if is_admin and resource["transfer_mode"] in SKILL_MODES and applicant["status"] in {"in_service", "completion_pending"}:
-                    target = applicant["applicant_id"] if fault == "applicant" else resource["owner_id"] if fault == "provider" else None
-                    if target:
-                        record_event(db, target, -10, "skill_no_show", reason, reference_type="application", reference_id=applicant["id"], actor_id=g.user["id"], event_key=f"termination:{applicant['id']}:{fault}")
-                _notify(db, applicant["applicant_id"], f"“{resource['name']}”已下架，相关流转已结束", url_for("applications"))
-            if is_admin:
-                audit(db, g.user["id"], "application_terminate", "resource", resource_id, f"{fault}：{reason}")
-        else:
-            db.execute("DELETE FROM resources WHERE id=?", (resource_id,))
+        has_history = _withdraw_resource(db, resource, is_admin, request.form)
         db.commit()
         if not has_history and not is_admin:
             _remove_image(resource["image_name"])
@@ -1045,17 +1017,17 @@ def create_app(test_config=None) -> Flask:
         if not resource_ids:
             abort(400, "请至少选择一项资源。")
         placeholders = ",".join("?" for _ in resource_ids)
-        active_ids = {
-            row[0] for row in get_db().execute(
-                f"SELECT id FROM resources WHERE id IN ({placeholders}) AND status!='withdrawn'",
+        db = get_db()
+        resources = db.execute(
+            f"SELECT * FROM resources WHERE id IN ({placeholders}) AND status!='withdrawn'",
                 tuple(resource_ids),
-            )
-        }
-        if not active_ids:
+        ).fetchall()
+        if not resources:
             abort(409, "所选资源均已下架。")
-        for resource_id in active_ids:
-            resource_withdraw(resource_id=resource_id)
-        flash(f"已下架 {len(active_ids)} 项资源。", "success")
+        for resource in resources:
+            _withdraw_resource(db, resource, True, request.form)
+        db.commit()
+        flash(f"已下架 {len(resources)} 项资源。", "success")
         return redirect(url_for("admin_resources"))
 
     @app.post("/admin/lost-found/bulk-withdraw")
@@ -1065,12 +1037,26 @@ def create_app(test_config=None) -> Flask:
         if not item_ids:
             abort(400, "请至少选择一条失物信息。")
         placeholders = ",".join("?" for _ in item_ids)
-        cursor = get_db().execute(
-            f"UPDATE lost_found SET status='withdrawn',updated_at=CURRENT_TIMESTAMP "
-            f"WHERE id IN ({placeholders}) AND status!='withdrawn'", tuple(item_ids)
-        )
-        get_db().commit()
-        flash(f"已下架 {cursor.rowcount} 条失物信息。", "success")
+        db = get_db()
+        items = db.execute(
+            f"SELECT * FROM lost_found WHERE id IN ({placeholders}) AND status!='withdrawn'", tuple(item_ids)
+        ).fetchall()
+        for item in items:
+            _withdraw_lost_found(db, item)
+        db.commit()
+        flash(f"已下架 {len(items)} 条失物信息。", "success")
+        return redirect(url_for("admin_content"))
+
+    @app.post("/admin/lost-found/<int:item_id>/withdraw")
+    @admin_required
+    def admin_lost_found_withdraw(item_id):
+        db = get_db()
+        item = db.execute("SELECT * FROM lost_found WHERE id=? AND status!='withdrawn'", (item_id,)).fetchone()
+        if item is None:
+            abort(404)
+        _withdraw_lost_found(db, item)
+        db.commit()
+        flash("失物信息已下架。", "success")
         return redirect(url_for("admin_content"))
 
     @app.route("/admin/content")
@@ -1910,6 +1896,45 @@ def owner_required(view):
 def _ensure_manageable_user(user):
     if g.user["role"] != "owner" and user["role"] != "student":
         abort(403, "管理员不能操作其他管理员。")
+
+
+def _withdraw_resource(db, resource, is_admin, form):
+    has_history = db.execute(
+        "SELECT 1 FROM applications WHERE resource_id=?", (resource["id"],)
+    ).fetchone()
+    if not has_history and not is_admin:
+        db.execute("DELETE FROM resources WHERE id=?", (resource["id"],))
+        return False
+    fault = form.get("fault", "neutral")
+    reason = form.get("reason", "").strip() or "管理员终止流转"
+    if is_admin and fault not in {"neutral", "borrower", "applicant", "provider"}:
+        abort(400, "归责类型无效。")
+    affected = db.execute(
+        "SELECT applicant_id,status,id FROM applications WHERE resource_id=? AND status IN ('pending','borrowed','return_pending','in_service','completion_pending')",
+        (resource["id"],),
+    ).fetchall()
+    db.execute("UPDATE resources SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=?", (resource["id"],))
+    db.execute(
+        "UPDATE applications SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE resource_id=? AND status IN ('pending','borrowed','return_pending','in_service','completion_pending')",
+        (resource["id"],),
+    )
+    for applicant in affected:
+        if is_admin and resource["transfer_mode"] == "borrow" and fault == "borrower" and applicant["status"] in {"borrowed", "return_pending"}:
+            record_event(db, applicant["applicant_id"], -15, "borrower_termination", reason, reference_type="application", reference_id=applicant["id"], actor_id=g.user["id"], event_key=f"termination:{applicant['id']}:borrower")
+        if is_admin and resource["transfer_mode"] in SKILL_MODES and applicant["status"] in {"in_service", "completion_pending"}:
+            target = applicant["applicant_id"] if fault == "applicant" else resource["owner_id"] if fault == "provider" else None
+            if target:
+                record_event(db, target, -10, "skill_no_show", reason, reference_type="application", reference_id=applicant["id"], actor_id=g.user["id"], event_key=f"termination:{applicant['id']}:{fault}")
+        _notify(db, applicant["applicant_id"], f"“{resource['name']}”已下架，相关流转已结束", url_for("applications"))
+    if is_admin:
+        audit(db, g.user["id"], "application_terminate", "resource", resource["id"], f"{fault}：{reason}")
+    return bool(has_history)
+
+
+def _withdraw_lost_found(db, item):
+    db.execute("UPDATE lost_found SET status='withdrawn',updated_at=CURRENT_TIMESTAMP WHERE id=?", (item["id"],))
+    audit(db, g.user["id"], "lost_found_withdraw", "lost_found", item["id"])
+    _notify(db, item["user_id"], "你的失物信息已被管理员下架。", url_for("lost_found"))
 
 
 if __name__ == "__main__":
