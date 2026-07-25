@@ -1,5 +1,6 @@
 import re
 import sqlite3
+from datetime import datetime
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 
@@ -13,6 +14,76 @@ SECTIONS = {
     "campus": "校园生活",
     "feedback": "建议反馈",
 }
+
+SECTION_NEIGHBORS = {
+    "resource": {"study", "feedback"},
+    "lost_found": {"campus", "resource"},
+    "study": {"resource", "campus"},
+    "campus": {"lost_found", "study"},
+    "feedback": {"campus", "resource"},
+}
+
+
+def record_behavior(db, user_id, event_type, target_type, target_id):
+    if user_id:
+        db.execute(
+            "INSERT OR IGNORE INTO behavior_events(user_id,event_type,target_type,target_id) VALUES(?,?,?,?)",
+            (user_id, event_type, target_type, target_id),
+        )
+
+
+def recommended_posts(db, user_id=None, limit=6):
+    rows = db.execute(
+        "SELECT p.*,u.name author_name,COALESCE(GROUP_CONCAT(t.name,' '),'') tag_names,"
+        "(SELECT COUNT(*) FROM content_reactions r WHERE r.target_type='post' AND r.target_id=p.id AND r.kind='like') likes,"
+        "(SELECT COUNT(*) FROM content_reactions r WHERE r.target_type='post' AND r.target_id=p.id AND r.kind='favorite') favorites,"
+        "(SELECT COUNT(*) FROM comments c WHERE c.target_type='post' AND c.target_id=p.id AND c.status='published') comment_count,"
+        "(SELECT COUNT(*) FROM reposts rp WHERE rp.post_id=p.id AND rp.status='published') repost_count "
+        "FROM posts p JOIN users u ON u.id=p.author_id "
+        "LEFT JOIN post_tags pt ON pt.post_id=p.id LEFT JOIN tags t ON t.id=pt.tag_id "
+        "WHERE p.status='published' GROUP BY p.id ORDER BY p.created_at DESC,p.id DESC LIMIT 200"
+    ).fetchall()
+    interests = {}
+    preferred_section = None
+    if user_id:
+        for row in db.execute(
+            "SELECT t.name,e.event_type,COUNT(*) amount FROM behavior_events e "
+            "JOIN post_tags pt ON e.target_type='post' AND pt.post_id=e.target_id "
+            "JOIN tags t ON t.id=pt.tag_id WHERE e.user_id=? GROUP BY t.name,e.event_type",
+            (user_id,),
+        ).fetchall():
+            weight = {"view_post": 1, "like": 5, "favorite": 7, "comment": 4, "repost": 6}.get(row["event_type"], 1)
+            interests[row["name"]] = interests.get(row["name"], 0) + row["amount"] * weight
+        section = db.execute(
+            "SELECT p.section,COUNT(*) amount FROM behavior_events e JOIN posts p ON p.id=e.target_id "
+            "WHERE e.user_id=? AND e.target_type='post' GROUP BY p.section ORDER BY amount DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        preferred_section = section["section"] if section else None
+    max_interest = max(interests.values(), default=0)
+    now = datetime.now()
+    scored = []
+    for row in rows:
+        tag_score = sum(interests.get(tag, 0) for tag in row["tag_names"].split())
+        content = min(60.0, 60.0 * tag_score / max_interest) if max_interest else 0.0
+        created = datetime.fromisoformat(row["created_at"])
+        age_days = max(0.0, (now - created).total_seconds() / 86400)
+        freshness = max(0.0, 25.0 * (1 - age_days / 7))
+        heat = min(15.0, row["likes"] * 2 + row["favorites"] * 3 + row["comment_count"] + row["repost_count"] * 2)
+        item = dict(row)
+        item["recommendation_score"] = content + freshness + heat
+        scored.append(item)
+    scored.sort(key=lambda item: (item["recommendation_score"], item["created_at"], item["id"]), reverse=True)
+    if not preferred_section:
+        return scored[:limit]
+    same = [item for item in scored if item["section"] == preferred_section]
+    near = [item for item in scored if item["section"] in SECTION_NEIGHBORS[preferred_section]]
+    far = [item for item in scored if item not in same and item not in near]
+    selected = same[: max(1, round(limit * 0.6))] + near[: max(1, round(limit * 0.3))] + far[: max(0, limit - round(limit * 0.9))]
+    for item in scored:
+        if item not in selected and len(selected) < limit:
+            selected.append(item)
+    return selected[:limit]
 
 
 def validate_post_form(form):
@@ -128,6 +199,9 @@ def create_community_blueprint(login_required, save_image, notify):
             "WHERE " + " AND ".join(where) + " ORDER BY p.created_at DESC,p.id DESC LIMIT 24",
             params,
         ).fetchall()
+        if g.user and section in SECTIONS:
+            record_behavior(get_db(), g.user["id"], "view_section", "section", list(SECTIONS).index(section) + 1)
+            get_db().commit()
         return render_template(
             "community_list.html", posts=posts, sections=SECTIONS, selected=section
         )
@@ -177,6 +251,9 @@ def create_community_blueprint(login_required, save_image, notify):
             (post_id,),
         ).fetchall()
         comments = comments_for_target(db, "post", post_id, request.args.get("order", "new"))
+        if g.user and post["status"] == "published":
+            record_behavior(db, g.user["id"], "view_post", "post", post_id)
+            db.commit()
         return render_template(
             "community_detail.html", post=post, tags=tags, reposts=reposts,
             comments=comments, target_type="post", target_id=post_id,
@@ -306,6 +383,7 @@ def create_community_blueprint(login_required, save_image, notify):
         )
         if post["author_id"] != g.user["id"]:
             notify(db, post["author_id"], f"{g.user['name']} 转发了你的帖子", url_for("community.post_detail", post_id=post_id))
+        record_behavior(db, g.user["id"], "repost", "post", post_id)
         db.commit()
         return redirect(url_for("community.post_detail", post_id=post_id))
 
@@ -323,6 +401,8 @@ def create_community_blueprint(login_required, save_image, notify):
             "INSERT INTO comments(author_id,target_type,target_id,body) VALUES(?,?,?,?)",
             (g.user["id"], target_type, target_id, body),
         )
+        if target_type == "post":
+            record_behavior(db, g.user["id"], "comment", "post", target_id)
         url = _target_url(target_type, target_id)
         recipients = _mentioned_user_ids(db, body)
         if target["owner_id"] != g.user["id"]:
@@ -397,6 +477,8 @@ def create_community_blueprint(login_required, save_image, notify):
                 "INSERT INTO content_reactions(user_id,target_type,target_id,kind) VALUES(?,?,?,?)",
                 (g.user["id"], target_type, target_id, kind),
             )
+            if target_type == "post":
+                record_behavior(db, g.user["id"], kind, "post", target_id)
         db.commit()
         return redirect(_target_url(target_type, target_id))
 

@@ -26,7 +26,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from community import comments_for_target, create_community_blueprint
+from community import comments_for_target, create_community_blueprint, recommended_posts
 from db import default_data_dir, get_db, init_app as init_db_app, init_db
 
 
@@ -187,10 +187,7 @@ def create_app(test_config=None) -> Flask:
             "SELECT r.*, u.name owner_name FROM resources r JOIN users u ON u.id = r.owner_id "
             "WHERE r.status != 'withdrawn' ORDER BY r.created_at DESC LIMIT 6"
         ).fetchall()
-        posts = db.execute(
-            "SELECT p.*,u.name author_name FROM posts p JOIN users u ON u.id=p.author_id "
-            "WHERE p.status='published' ORDER BY p.created_at DESC,p.id DESC LIMIT 6"
-        ).fetchall()
+        posts = recommended_posts(db, g.user["id"] if g.user else None, 6)
         lost_items = db.execute(
             "SELECT lf.*,u.name owner_name FROM lost_found lf JOIN users u ON u.id=lf.user_id "
             "WHERE lf.status!='withdrawn' ORDER BY lf.created_at DESC,lf.id DESC LIMIT 6"

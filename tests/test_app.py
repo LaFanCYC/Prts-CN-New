@@ -857,6 +857,35 @@ class CampusAppTest(unittest.TestCase):
             self.assertEqual(page.status_code, 200)
             self.assertIn(title, page.get_data(as_text=True))
 
+    def test_recommendations_use_behavior_tags_and_dedupe_daily_views(self):
+        self.register()
+        self.login()
+        self.publish_post(title="Python 基础资料", tags="python,编程")
+        self.publish_post(title="Python 练习伙伴", tags="python,练习")
+        self.publish_post(title="校园歌手比赛", section="campus", tags="音乐,校园")
+        with self.db() as db:
+            seed_id = db.execute(
+                "SELECT id FROM posts WHERE title='Python 基础资料'"
+            ).fetchone()[0]
+
+        self.switch_user("bob", "S002")
+        self.client.get(f"/community/{seed_id}")
+        self.client.get(f"/community/{seed_id}")
+        self.client.post(f"/reactions/post/{seed_id}/like")
+
+        home = self.client.get("/").get_data(as_text=True)
+        self.assertLess(home.index("Python 练习伙伴"), home.index("校园歌手比赛"))
+        with self.db() as db:
+            views = db.execute(
+                "SELECT COUNT(*) FROM behavior_events WHERE event_type='view_post' AND target_id=?",
+                (seed_id,),
+            ).fetchone()[0]
+            likes = db.execute(
+                "SELECT COUNT(*) FROM behavior_events WHERE event_type='like' AND target_id=?",
+                (seed_id,),
+            ).fetchone()[0]
+        self.assertEqual((views, likes), (1, 1))
+
 
 if __name__ == "__main__":
     unittest.main()
