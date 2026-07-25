@@ -1021,9 +1021,18 @@ def create_app(test_config=None) -> Flask:
         resource_ids = {int(item) for item in request.form.getlist("resource_ids") if item.isdigit()}
         if not resource_ids:
             abort(400, "请至少选择一项资源。")
-        for resource_id in resource_ids:
+        placeholders = ",".join("?" for _ in resource_ids)
+        active_ids = {
+            row[0] for row in get_db().execute(
+                f"SELECT id FROM resources WHERE id IN ({placeholders}) AND status!='withdrawn'",
+                tuple(resource_ids),
+            )
+        }
+        if not active_ids:
+            abort(409, "所选资源均已下架。")
+        for resource_id in active_ids:
             resource_withdraw(resource_id=resource_id)
-        flash(f"已下架 {len(resource_ids)} 项资源。", "success")
+        flash(f"已下架 {len(active_ids)} 项资源。", "success")
         return redirect(url_for("admin_resources"))
 
     @app.route("/admin/content")
