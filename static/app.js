@@ -34,3 +34,16 @@ document.addEventListener('click', event => {
     document.querySelectorAll('[data-dropdown].open').forEach(dropdown => dropdown.classList.remove('open'));
   }
 });
+
+// Flask 表单通常重定向回当前页；保留阅读位置，避免交互后跳回页首。
+if ('scrollRestoration' in history) {
+  history.scrollRestoration = 'manual';
+}
+const scrollKey = `campus-scroll:${location.pathname}`;
+const savedScroll = sessionStorage.getItem(scrollKey);
+if (!location.hash && savedScroll !== null) {
+  requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll)));
+}
+window.addEventListener('pagehide', () => {
+  sessionStorage.setItem(scrollKey, String(window.scrollY));
+});

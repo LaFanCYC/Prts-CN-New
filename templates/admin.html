@@ -1,7 +1,47 @@
 {% extends 'base.html' %}{% block title %}管理后台 · 校园智享{% endblock %}{% block content %}
-{% include '_admin_nav.html' %}<h1>管理后台</h1>{% set labels={'users':'用户总数','resources':'资源总数','pending':'待审批','borrowing':'借用中'} %}
-<section class="stats">{% for key in ('users','resources','pending','borrowing') %}<article class="stat"><strong>{{ stats.summary[key] }}</strong><span>{{ labels[key] }}</span></article>{% endfor %}</section>
-<div class="two-columns">{% for title,rows in [('资源类别统计', stats.categories), ('流转方式统计', stats.modes)] %}<section class="panel"><h2>{{ title }}</h2>{% if rows %}<div class="pie-chart"><canvas data-pie='{{ rows|tojson }}' aria-label="{{ title }}扇形统计图"></canvas><ul>{% for row in rows %}<li><i></i>{{ row.label }} <b>{{ row.value }}</b></li>{% endfor %}</ul></div>{% else %}<p class="muted">暂无数据</p>{% endif %}</section>{% endfor %}</div>
-<section class="panel"><h2>待处理事项</h2><div class="actions"><a class="badge" href="{{ url_for('admin_content') }}">待审核帖子 {{ todo.posts }}</a><a class="badge" href="{{ url_for('admin_content') }}">举报 {{ todo.reports }}</a><a class="badge" href="{{ url_for('admin_credit') }}">信用申诉 {{ todo.appeals }}</a></div></section><section class="panel"><h2>快捷入口</h2><div class="actions"><a class="button secondary" href="{{ url_for('admin_users') }}">用户管理</a><a class="button secondary" href="{{ url_for('admin_resources') }}">资源管理</a><a class="button secondary" href="{{ url_for('admin_content') }}">内容审核</a><a class="button secondary" href="{{ url_for('admin_settings') }}">系统设置</a></div></section><section><div class="section-head"><h2>最近审计日志</h2><a href="{{ url_for('admin_audit') }}">查看全部</a></div><div class="table-wrap"><table><thead><tr><th>时间</th><th>管理员</th><th>操作</th><th>目标</th><th>说明</th></tr></thead><tbody>{% for item in audit_logs %}<tr><td>{{ item.created_at }}</td><td>{{ item.actor_name or '系统' }}</td><td>{{ item.action }}</td><td>{{ item.target_type }} #{{ item.target_id or '' }}</td><td>{{ item.detail }}</td></tr>{% else %}<tr><td colspan="5">暂无审计日志</td></tr>{% endfor %}</tbody></table></div></section>
-<script>const colors=['#3d5a80','#3a8','#d6800f','#d34','#756bb1','#4292c6','#8c6d31'];document.querySelectorAll('[data-pie]').forEach(canvas=>{const rows=JSON.parse(canvas.dataset.pie),total=rows.reduce((sum,row)=>sum+row.value,0),ctx=canvas.getContext('2d'),size=220;canvas.width=canvas.height=size;let start=-Math.PI/2;rows.forEach((row,index)=>{const end=start+row.value/total*Math.PI*2;ctx.beginPath();ctx.moveTo(size/2,size/2);ctx.arc(size/2,size/2,90,start,end);ctx.closePath();ctx.fillStyle=colors[index%colors.length];ctx.fill();start=end;canvas.parentElement.querySelectorAll('i')[index].style.background=colors[index%colors.length]})})</script>
+{% include '_admin_nav.html' %}<h1>管理后台</h1>{% set
+labels={'users':'用户总数','resources':'资源总数','pending':'待审批','borrowing':'借用中'} %}
+<section class="stats">{% for key in ('users','resources','pending','borrowing') %}<article class="stat"><strong>{{
+            stats.summary[key] }}</strong><span>{{ labels[key] }}</span></article>{% endfor %}</section>
+<div class="two-columns">{% for title,rows in [('资源类别统计', stats.categories), ('流转方式统计', stats.modes)] %}<section
+        class="panel">
+        <h2>{{ title }}</h2>{% if rows %}<div class="pie-chart"><canvas data-pie='{{ rows|tojson }}'
+                aria-label="{{ title }}扇形统计图"></canvas>
+            <ul>{% for row in rows %}<li><i></i>{{ row.label }} <b>{{ row.value }}</b></li>{% endfor %}</ul>
+        </div>{% else %}<p class="muted">暂无数据</p>{% endif %}
+    </section>{% endfor %}</div>
+<section class="panel">
+    <h2>待处理事项</h2>
+    <div class="actions"><a class="badge" href="{{ url_for('admin_content') }}">待审核帖子 {{ todo.posts }}</a><a
+            class="badge" href="{{ url_for('admin_content') }}">举报 {{ todo.reports }}</a><a class="badge"
+            href="{{ url_for('admin_credit') }}">信用申诉 {{ todo.appeals }}</a></div>
+</section>
+<section>
+    <div class="section-head">
+        <h2>最近审计日志</h2><a href="{{ url_for('admin_audit') }}">查看全部</a>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>时间</th>
+                    <th>管理员</th>
+                    <th>操作</th>
+                    <th>目标</th>
+                    <th>说明</th>
+                </tr>
+            </thead>
+            <tbody>{% for item in audit_logs %}<tr>
+                    <td>{{ item.created_at }}</td>
+                    <td>{{ item.actor_name or '系统' }}</td>
+                    <td>{{ item.action }}</td>
+                    <td>{{ item.target_type }} #{{ item.target_id or '' }}</td>
+                    <td>{{ item.detail }}</td>
+                </tr>{% else %}<tr>
+                    <td colspan="5">暂无审计日志</td>
+                </tr>{% endfor %}</tbody>
+        </table>
+    </div>
+</section>
+<script>const colors = ['#3d5a80', '#3a8', '#d6800f', '#d34', '#756bb1', '#4292c6', '#8c6d31']; document.querySelectorAll('[data-pie]').forEach(canvas => { const rows = JSON.parse(canvas.dataset.pie), total = rows.reduce((sum, row) => sum + row.value, 0), ctx = canvas.getContext('2d'), size = 220; canvas.width = canvas.height = size; let start = -Math.PI / 2; rows.forEach((row, index) => { const end = start + row.value / total * Math.PI * 2; ctx.beginPath(); ctx.moveTo(size / 2, size / 2); ctx.arc(size / 2, size / 2, 90, start, end); ctx.closePath(); ctx.fillStyle = colors[index % colors.length]; ctx.fill(); start = end; canvas.parentElement.querySelectorAll('i')[index].style.background = colors[index % colors.length] }) })</script>
 {% endblock %}
