@@ -3,10 +3,13 @@ import re
 import secrets
 import sqlite3
 import uuid
+import json
 from datetime import date
 from difflib import SequenceMatcher
 from functools import wraps
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
 
 import click
@@ -48,6 +51,11 @@ APPLICATION_STATUS_LABELS = {
     "returned": "已归还", "rejected": "已拒绝", "completed": "已完成",
     "in_service": "服务进行中", "completion_pending": "待确认完成", "withdrawn": "已撤销",
 }
+DEFAULT_AI_SYSTEM_PROMPT = (
+    "你是一个校园资源共享平台的搜索助手。根据用户的搜索描述和平台内匹配到的"
+    "内容列表，帮助用户整理最相关的结果，用简洁的中文说明每个结果为什么可能"
+    "符合他的需求。只返回 JSON 数组，每项包含 id 和 reason，不要额外解释。"
+)
 
 
 def _secret_key(data_dir: Path) -> str:
@@ -151,7 +159,28 @@ def create_app(test_config=None) -> Flask:
             "application_status_labels": APPLICATION_STATUS_LABELS,
             "today": date.today().isoformat(),
             "breadcrumb_label": breadcrumb_label,
+            "ai_enabled": bool(_ai_config(get_db())["enabled"]),
         }
+
+    @app.post("/api/ai/search")
+    def ai_search():
+        payload = request.get_json(silent=True) or {}
+        query = payload.get("query", "")
+        if not isinstance(query, str):
+            abort(400, "搜索内容无效。")
+        query = query.strip()
+        if not query:
+            return jsonify(results=[], mode="keyword")
+        if len(query) > 100:
+            abort(400, "搜索内容不能超过 100 个字符。")
+        results = search_content(query)
+        config = _ai_config(get_db())
+        if config["enabled"] and results:
+            enhanced = ai_enhance_results(query, results, config)
+            if enhanced is not None:
+                results = enhanced
+                return jsonify(results=results, mode="ai")
+        return jsonify(results=results, mode="keyword")
 
     @app.cli.command("init-demo")
     def init_demo_command():
@@ -954,7 +983,46 @@ def create_app(test_config=None) -> Flask:
                 "JOIN credit_events ce ON ce.id=ca.event_id JOIN users u ON u.id=ca.user_id "
                 "WHERE ca.status='pending' ORDER BY ca.created_at"
             ).fetchall(),
+            ai_config=_ai_config(db),
         )
+
+    @app.route("/admin/ai-config", methods=["GET", "POST"])
+    @admin_required
+    def admin_ai_config():
+        if request.method == "GET":
+            return redirect(url_for("admin"))
+        enabled = 1 if request.form.get("enabled") else 0
+        endpoint = request.form.get("api_endpoint", "").strip()
+        api_key = request.form.get("api_key", "").strip()
+        model = request.form.get("model", "").strip()
+        system_prompt = request.form.get("system_prompt", "").strip()
+        try:
+            max_results = int(request.form.get("max_results", "10"))
+        except ValueError:
+            abort(400, "最大结果数无效。")
+        if len(endpoint) > 500 or len(api_key) > 500 or len(model) > 100 or len(system_prompt) > 1000:
+            abort(400, "AI 配置内容过长。")
+        if not 1 <= max_results <= 10:
+            abort(400, "最大结果数必须在 1 到 10 之间。")
+        if enabled and (not endpoint.startswith(("http://", "https://")) or not model):
+            abort(400, "启用 AI 时必须填写 HTTP(S) 地址和模型名。")
+        db = get_db()
+        previous = _ai_config(db)
+        db.execute(
+            "INSERT INTO ai_config(id,enabled,api_endpoint,api_key,model,system_prompt,max_results,updated_at) "
+            "VALUES(1,?,?,?,?,?,?,CURRENT_TIMESTAMP) "
+            "ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,api_endpoint=excluded.api_endpoint,"
+            "api_key=excluded.api_key,model=excluded.model,system_prompt=excluded.system_prompt,"
+            "max_results=excluded.max_results,updated_at=CURRENT_TIMESTAMP",
+            (
+                enabled, endpoint, api_key or previous["api_key"], model,
+                system_prompt or DEFAULT_AI_SYSTEM_PROMPT, max_results,
+            ),
+        )
+        audit(db, g.user["id"], "ai_config_update", "ai_config", 1, "已更新 AI 搜索配置")
+        db.commit()
+        flash("AI 助手配置已保存。", "success")
+        return redirect(url_for("admin"))
 
     @app.route("/api/admin/stats")
     @admin_required
@@ -1216,6 +1284,103 @@ def create_app(test_config=None) -> Flask:
         return render_template("error.html", error=error), error.code
 
     return app
+
+
+def _ai_config(db):
+    config = db.execute("SELECT * FROM ai_config WHERE id=1").fetchone()
+    return config or {
+        "enabled": 0,
+        "api_endpoint": "",
+        "api_key": "",
+        "model": "",
+        "system_prompt": DEFAULT_AI_SYSTEM_PROMPT,
+        "max_results": 10,
+    }
+
+
+def search_content(query):
+    pattern = f"%{query}%"
+    rows = get_db().execute(
+        "SELECT * FROM ("
+        "SELECT 'resource' AS type,id,name AS title,description AS summary,created_at,"
+        "CASE WHEN name=? THEN 3 WHEN name LIKE ? THEN 2 ELSE 1 END AS relevance "
+        "FROM resources WHERE status!='withdrawn' AND (name LIKE ? OR description LIKE ? OR keywords LIKE ?) "
+        "UNION ALL "
+        "SELECT 'post',id,title,body,created_at,"
+        "CASE WHEN title=? THEN 3 WHEN title LIKE ? THEN 2 ELSE 1 END "
+        "FROM posts WHERE status='published' AND (title LIKE ? OR body LIKE ?) "
+        "UNION ALL "
+        "SELECT 'lost_found',id,title,description,created_at,"
+        "CASE WHEN title=? THEN 3 WHEN title LIKE ? THEN 2 ELSE 1 END "
+        "FROM lost_found WHERE status!='withdrawn' AND (title LIKE ? OR description LIKE ? OR keywords LIKE ?)"
+        ") ORDER BY relevance DESC,created_at DESC LIMIT 15",
+        (
+            query, pattern, pattern, pattern, pattern,
+            query, pattern, pattern, pattern,
+            query, pattern, pattern, pattern, pattern,
+        ),
+    ).fetchall()
+    labels = {"resource": "资源", "post": "社区帖子", "lost_found": "失物招领"}
+    endpoints = {
+        "resource": lambda item: url_for("resource_detail", resource_id=item["id"]),
+        "post": lambda item: url_for("community.post_detail", post_id=item["id"]),
+        "lost_found": lambda item: url_for("lost_found_detail", item_id=item["id"]),
+    }
+    return [
+        {
+            "id": f"{row['type']}:{row['id']}",
+            "type": labels[row["type"]],
+            "title": row["title"],
+            "summary": row["summary"][:200],
+            "url": endpoints[row["type"]](row),
+        }
+        for row in rows
+    ]
+
+
+def ai_enhance_results(query, results, config):
+    prompt_results = [
+        {key: result[key] for key in ("id", "type", "title", "summary")}
+        for result in results[:config["max_results"]]
+    ]
+    body = json.dumps(
+        {
+            "query": query,
+            "results": prompt_results,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request_data = {
+        "model": config["model"],
+        "messages": [
+            {"role": "system", "content": config["system_prompt"]},
+            {"role": "user", "content": body.decode("utf-8")},
+        ],
+        "temperature": 0.2,
+    }
+    try:
+        request_obj = Request(
+            config["api_endpoint"],
+            data=json.dumps(request_data, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {config['api_key']}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(request_obj, timeout=5) as response:
+            content = json.loads(response.read().decode("utf-8"))["choices"][0]["message"]["content"]
+        reasons = {
+            item["id"]: item["reason"].strip()[:300]
+            for item in json.loads(content)
+            if isinstance(item, dict)
+            and item.get("id") in {result["id"] for result in prompt_results}
+            and isinstance(item.get("reason"), str)
+            and item["reason"].strip()
+        }
+    except (HTTPError, URLError, OSError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return [{**result, **({"reason": reasons[result["id"]]} if result["id"] in reasons else {})} for result in results]
 
 
 def _safe_next(value):

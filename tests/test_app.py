@@ -7,6 +7,8 @@ import unittest
 import zipfile
 from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import URLError
 
 from app import create_app, match_score
 from credit import credit_tier, permission_for_score
@@ -183,6 +185,51 @@ class CampusAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("摄影入门互助", text)
         self.assertNotIn("Python 入门教材", text)
+
+    def test_ai_search_is_available_to_visitors_and_falls_back_to_keyword_results(self):
+        self.register()
+        self.login()
+        self.publish_resource(name="Python 算法教材", description="适合算法课复习")
+        self.client.post("/logout")
+
+        response = self.client.post("/api/ai/search", json={"query": "算法教材"})
+        data = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["mode"], "keyword")
+        self.assertEqual(data["results"][0]["title"], "Python 算法教材")
+        self.assertIn("data-ai-assistant", self.client.get("/").get_data(as_text=True))
+
+        with self.db() as db:
+            db.execute("UPDATE users SET role='admin' WHERE username='alice'")
+            db.commit()
+        self.login()
+        self.assertEqual(
+            self.client.post(
+                "/admin/ai-config",
+                data={
+                    "enabled": "on",
+                    "api_endpoint": "https://ai.example/v1/chat/completions",
+                    "api_key": "secret",
+                    "model": "test-model",
+                    "system_prompt": "只返回 JSON。",
+                    "max_results": "5",
+                },
+            ).status_code,
+            302,
+        )
+        with patch("app.urlopen", side_effect=URLError("offline")):
+            response = self.client.post("/api/ai/search", json={"query": "算法教材"})
+        self.assertEqual(response.get_json()["mode"], "keyword")
+
+    def test_ai_search_rejects_empty_and_oversized_queries(self):
+        self.assertEqual(
+            self.client.post("/api/ai/search", json={"query": "  "}).get_json(),
+            {"mode": "keyword", "results": []},
+        )
+        self.assertEqual(
+            self.client.post("/api/ai/search", json={"query": "x" * 101}).status_code,
+            400,
+        )
 
     def test_owner_can_edit_and_withdraw_resource_while_other_users_cannot(self):
         self.register()
