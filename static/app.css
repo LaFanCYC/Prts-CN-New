@@ -4,8 +4,8 @@
   --muted: #68758e;
   --line: #e1e5ea;
   --paper: #fff;
-  --blue: #4f6f8f;
-  --blue-light: #e8f0f6;
+  --blue: #3d5a80;
+  --blue-light: #e2ebf5;
   --green: #3a8;
   --green-light: #e6f7ed;
   --amber: #d6800f;
@@ -194,7 +194,7 @@ button{font:inherit;cursor:pointer}
 /* === Resource list (Flarum discussion-list style) === */
 .discussion-list{display:flex;flex-direction:column;gap:1px}
 .discussion-item {
-  display:flex;align-items:flex-start;gap:14px;padding:18px 20px;
+  display:flex;align-items:flex-start;gap:14px;padding:20px;
   background:var(--paper);transition:background .15s;
 }
 .discussion-item:first-child{border-radius:var(--radius) var(--radius) 0 0}
@@ -209,7 +209,7 @@ button{font:inherit;cursor:pointer}
   font-weight:700;font-size:16px;
 }
 .discussion-content{flex:1;min-width:0}
-.discussion-content h3{margin:0 0 4px;font-size:15px;font-weight:600}
+.discussion-content h3{margin:0 0 4px;font-size:16px;font-weight:700}
 .discussion-content h3 a{color:var(--ink)}
 .discussion-content h3 a:hover{color:var(--blue)}
 .discussion-meta{display:flex;gap:14px;font-size:12px;color:var(--muted)}
@@ -245,7 +245,7 @@ dd{margin:0;font-size:13px}
 form{display:grid;gap:14px}
 label{display:grid;gap:4px;font-size:13px;font-weight:600;color:var(--ink)}
 input,select,textarea{
-  width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:4px;
+  width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:4px;
   background:var(--paper);color:var(--ink);font:inherit;font-size:14px;
 }
 input:focus,select:focus,textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px rgba(79,111,143,.15)}
@@ -362,15 +362,15 @@ tr:last-child td{border-bottom:0}
 }
 
 /* === Legacy backward-compatible classes === */
-.panel{background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:24px;margin-bottom:16px}
+.panel{background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:20px;margin-bottom:16px}
 .panel.narrow{max-width:480px;margin:20px auto}
-.card{background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:24px;transition:box-shadow .2s}
+.card{background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:20px;transition:box-shadow .2s}
 .card:hover{box-shadow:var(--shadow-md)}
 .resource-card{padding:0;overflow:hidden}
 .resource-card:hover{transform:translateY(-2px)}
 .resource-card>img{width:100%;height:180px;object-fit:cover}
 .resource-card>div{padding:20px}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:18px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
 .resource-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
 .filter{display:grid;grid-template-columns:2fr repeat(4,1fr) auto;gap:10px;margin-bottom:20px}
 .filter.compact{grid-template-columns:2fr 1fr 1fr auto}
@@ -439,7 +439,7 @@ details summary{margin-bottom:12px;font-size:13px;color:var(--muted);cursor:poin
 /* === Badge styles === */
 .badge-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:20px}
 .profile-badges{grid-template-columns:1fr}
-.badge-card{display:flex;align-items:flex-start;gap:14px;background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:18px 20px;transition:box-shadow .15s;border-left:4px solid var(--line)}
+.badge-card{display:flex;align-items:flex-start;gap:14px;background:var(--paper);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:20px;transition:box-shadow .15s;border-left:4px solid var(--line)}
 .badge-card.earned{border-left-width:4px}
 .badge-card:hover{box-shadow:var(--shadow-md)}
 .badge-icon{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;border:2px solid var(--line)}
